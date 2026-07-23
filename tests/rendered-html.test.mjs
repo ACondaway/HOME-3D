@@ -44,13 +44,16 @@ test("server-renders the finished personal-room experience", async () => {
 });
 
 test("keeps bilingual content, 3D interaction, and fallback navigation in the product source", async () => {
-  const [page, layout, room, data, dataEn, packageJson] = await Promise.all([
+  const [page, layout, room, data, dataEn, packageJson, studio, contentConfig] =
+    await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/RoomExperience.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/portfolio-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/portfolio-data-en.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/ContentStudio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/content-config.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<RoomExperience \/>/);
@@ -63,6 +66,8 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(room, /跳过三维场景，打开内容索引/);
   assert.match(room, /Switch to English/);
   assert.match(room, /new URL\(window\.location\.href\)\.searchParams\.get\("lang"\)/);
+  assert.match(room, /<ContentStudio/);
+  assert.match(room, /params\.get\("studio"\)/);
   assert.match(data, /id: "music"/);
   assert.match(data, /id: "fitness"/);
   assert.match(data, /id: "reading"/);
@@ -70,10 +75,42 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(dataEn, /id: "music"/);
   assert.match(dataEn, /id: "future"/);
   assert.match(dataEn, /PORTFOLIO_ASSETS_EN/);
+  assert.match(studio, /Save to project/);
+  assert.match(studio, /\/__content-studio\/save/);
+  assert.match(studio, /site-content\.json/);
+  assert.match(contentConfig, /normalizeSiteContent/);
+  assert.match(contentConfig, /mergeAssets/);
   assert.match(packageJson, /"three":/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await assert.rejects(
     access(new URL("app/_sites-preview", projectRoot)),
   );
+});
+
+test("keeps the Content Studio write endpoint local to the Vite development server", async () => {
+  const [plugin, viteConfig, persistedContent] = await Promise.all([
+    readFile(
+      new URL("../build/content-studio-vite-plugin.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../public/content/site-content.json", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(plugin, /apply: "serve"/);
+  assert.match(plugin, /configureServer/);
+  assert.match(plugin, /hasLoopbackHost/);
+  assert.match(plugin, /hasLoopbackOrigin/);
+  assert.match(plugin, /MAX_BODY_BYTES = 256 \* 1024/);
+  assert.match(plugin, /rename\(temporaryPath, path\)/);
+  assert.match(viteConfig, /contentStudio\(\)/);
+  assert.deepEqual(JSON.parse(persistedContent), {
+    version: 1,
+    profile: {},
+    assets: {},
+  });
 });

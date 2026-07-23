@@ -20,12 +20,20 @@ import {
   type PortfolioAsset,
 } from "./portfolio-data";
 import {
-  ASSET_BY_ID_EN,
   CATEGORY_ORDER_EN,
   PORTFOLIO_ASSETS_EN,
 } from "./portfolio-data-en";
+import {
+  EMPTY_SITE_CONTENT,
+  mergeAssets,
+  mergeProfile,
+  parseSiteContent,
+  type ContentLocale,
+  type SiteContentConfig,
+} from "./content-config";
+import { ContentStudio } from "./ContentStudio";
 
-type Locale = "zh" | "en";
+type Locale = ContentLocale;
 
 const COPY = {
   zh: {
@@ -1974,6 +1982,13 @@ function HelpPanel({
 
 export default function RoomExperience() {
   const [locale, setLocale] = useState<Locale>("zh");
+  const [contentConfig, setContentConfig] =
+    useState<SiteContentConfig>(EMPTY_SITE_CONTENT);
+  const [publishedContent, setPublishedContent] =
+    useState<SiteContentConfig>(EMPTY_SITE_CONTENT);
+  const [contentLoaded, setContentLoaded] = useState(false);
+  const [studioEnabled, setStudioEnabled] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);
   const [ready, setReady] = useState(false);
   const [entered, setEntered] = useState(false);
   const [webglFailed, setWebglFailed] = useState(false);
@@ -1987,10 +2002,23 @@ export default function RoomExperience() {
   const openedFromRoomRef = useRef(false);
   const previousActiveRef = useRef<AssetId | null>(null);
   const copy = COPY[locale];
-  const assets =
+  const baseAssets =
     locale === "zh" ? PORTFOLIO_ASSETS : PORTFOLIO_ASSETS_EN;
-  const assetById =
-    locale === "zh" ? ASSET_BY_ID : ASSET_BY_ID_EN;
+  const profile = useMemo(
+    () => mergeProfile(locale, contentConfig),
+    [contentConfig, locale],
+  );
+  const assets = useMemo(
+    () => mergeAssets(baseAssets, locale, contentConfig),
+    [baseAssets, contentConfig, locale],
+  );
+  const assetById = useMemo(
+    () =>
+      Object.fromEntries(
+        assets.map((asset) => [asset.id, asset]),
+      ) as Record<AssetId, PortfolioAsset>,
+    [assets],
+  );
   const categoryOrder =
     locale === "zh" ? CATEGORY_ORDER : CATEGORY_ORDER_EN;
 
@@ -2020,6 +2048,54 @@ export default function RoomExperience() {
     );
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadContent = async () => {
+      let published = EMPTY_SITE_CONTENT;
+
+      try {
+        const response = await fetch("/content/site-content.json", {
+          cache: "no-store",
+        });
+        if (response.ok) {
+          published = parseSiteContent(await response.json());
+        }
+      } catch {
+        published = EMPTY_SITE_CONTENT;
+      }
+
+      let next = published;
+      try {
+        const localDraft = window.localStorage.getItem(
+          "living-index.content-draft.v1",
+        );
+        if (localDraft) next = parseSiteContent(localDraft);
+      } catch {
+        window.localStorage.removeItem("living-index.content-draft.v1");
+      }
+
+      if (!cancelled) {
+        setPublishedContent(published);
+        setContentConfig(next);
+        setContentLoaded(true);
+      }
+    };
+
+    void loadContent();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!contentLoaded) return;
+    window.localStorage.setItem(
+      "living-index.content-draft.v1",
+      JSON.stringify(contentConfig),
+    );
+  }, [contentConfig, contentLoaded]);
+
   const updateRoute = useCallback((id: AssetId | null, mode: "push" | "replace") => {
     const url = new URL(window.location.href);
     if (id) url.searchParams.set("section", id);
@@ -2030,6 +2106,25 @@ export default function RoomExperience() {
       url,
     );
   }, []);
+
+  const openStudio = useCallback(() => {
+    setEntered(true);
+    setIndexOpen(false);
+    setHelpOpen(false);
+    setActiveId(null);
+    updateRoute(null, "replace");
+    setStudioOpen(true);
+  }, [updateRoute]);
+
+  useEffect(() => {
+    const params = new URL(window.location.href).searchParams;
+    if (params.get("studio") !== "1") return;
+    const frame = window.requestAnimationFrame(() => {
+      setStudioEnabled(true);
+      openStudio();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [openStudio]);
 
   const openAsset = useCallback(
     (id: AssetId, source?: HTMLElement | null) => {
@@ -2075,8 +2170,8 @@ export default function RoomExperience() {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
     document.title =
       locale === "zh"
-        ? "你的名字 · 一间会回应你的房间"
-        : "Your Name · The Living Index";
+        ? `${profile.displayName} · 一间会回应你的房间`
+        : `${profile.displayName} · The Living Index`;
     const description = document.querySelector('meta[name="description"]');
     description?.setAttribute(
       "content",
@@ -2084,7 +2179,7 @@ export default function RoomExperience() {
         ? "一个可以自由探索的三维个人主页：从房间里的物品进入音乐、健身、阅读、研究、创作与生活。"
         : "An explorable 3D personal homepage where objects open into music, fitness, reading, research, making, and everyday life.",
     );
-  }, [locale]);
+  }, [locale, profile.displayName]);
 
   useEffect(() => {
     if (activeId && previousActiveRef.current !== activeId) {
@@ -2099,13 +2194,14 @@ export default function RoomExperience() {
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (activeId) closeAsset();
+      if (studioOpen) setStudioOpen(false);
+      else if (activeId) closeAsset();
       else if (indexOpen) setIndexOpen(false);
       else if (helpOpen) setHelpOpen(false);
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [activeId, closeAsset, helpOpen, indexOpen]);
+  }, [activeId, closeAsset, helpOpen, indexOpen, studioOpen]);
 
   const handleSceneKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" && hoveredId) openAsset(hoveredId);
@@ -2148,13 +2244,28 @@ export default function RoomExperience() {
           <div className="intro-gridline" aria-hidden="true" />
           <header className="intro-topbar">
             <div className="wordmark">
-              <span>Y</span>
+              <span>{profile.logoInitial}</span>
               <div>
-                <strong>YOUR NAME</strong>
-                <small>{copy.personalSpace}</small>
+                <strong>{profile.displayName}</strong>
+                <small>{profile.personalSpace}</small>
               </div>
             </div>
             <div className="intro-tools">
+              {studioEnabled && (
+                <button
+                  type="button"
+                  className="language-toggle studio-launch-button"
+                  onClick={openStudio}
+                  aria-label={
+                    locale === "zh"
+                      ? "打开内容工作台"
+                      : "Open Content Studio"
+                  }
+                >
+                  <span>{locale === "zh" ? "编辑" : "EDIT"}</span>
+                  <strong>✦</strong>
+                </button>
+              )}
               <button
                 type="button"
                 className="language-toggle"
@@ -2179,16 +2290,16 @@ export default function RoomExperience() {
           </header>
 
           <div className="intro-copy">
-            <p className="eyebrow">{copy.introEyebrow}</p>
+            <p className="eyebrow">{profile.introEyebrow}</p>
             <h1 id="intro-title">
-              {copy.introTitle}
+              {profile.introTitle}
               <br />
-              <em>{copy.introTitleEm}</em>
+              <em>{profile.introTitleEm}</em>
             </h1>
             <p className="intro-description">
               {webglFailed
                 ? copy.fallbackDescription
-                : copy.introDescription}
+                : profile.introDescription}
             </p>
             <div className="intro-actions">
               {!webglFailed && (
@@ -2232,7 +2343,7 @@ export default function RoomExperience() {
               <span>{copy.select}</span>
               <p>{copy.selectDescription}</p>
             </div>
-            <blockquote>{copy.quote}</blockquote>
+            <blockquote>{profile.quote}</blockquote>
           </footer>
         </section>
       )}
@@ -2254,9 +2365,9 @@ export default function RoomExperience() {
                   : "Return to the room’s opening view"
               }
             >
-              <span>Y</span>
+              <span>{profile.logoInitial}</span>
               <div>
-                <strong>YOUR NAME</strong>
+                <strong>{profile.displayName}</strong>
                 <small>{copy.livingIndex}</small>
               </div>
             </button>
@@ -2299,13 +2410,30 @@ export default function RoomExperience() {
                 <span>{copy.currentLanguage}</span>
                 <small>{copy.otherLanguage}</small>
               </button>
+              {studioEnabled && (
+                <button
+                  type="button"
+                  className="hud-language-button studio-launch-button"
+                  onClick={openStudio}
+                  aria-label={
+                    locale === "zh"
+                      ? "打开内容工作台"
+                      : "Open Content Studio"
+                  }
+                >
+                  <span>{locale === "zh" ? "编辑" : "Edit"}</span>
+                  <small>✦</small>
+                </button>
+              )}
             </div>
           </header>
 
           <div className="room-meta" aria-hidden="true">
             <span>ROOM 00</span>
             <i />
-            <span>SHANGHAI · GMT+8</span>
+            <span>
+              {profile.city.toUpperCase()} · {profile.timezone}
+            </span>
           </div>
 
           <div
@@ -2361,6 +2489,23 @@ export default function RoomExperience() {
           closeButtonRef={closeButtonRef}
         />
       )}
+      <ContentStudio
+        open={studioOpen}
+        locale={locale}
+        config={contentConfig}
+        profile={profile}
+        assets={assets}
+        onChange={setContentConfig}
+        onLocaleChange={changeLocale}
+        onClose={() => setStudioOpen(false)}
+        onReset={() => {
+          window.localStorage.removeItem("living-index.content-draft.v1");
+          setContentConfig(publishedContent);
+        }}
+        onProjectSaved={(savedConfig) => {
+          setPublishedContent(savedConfig);
+        }}
+      />
 
       <noscript>
         <section className="noscript-index">

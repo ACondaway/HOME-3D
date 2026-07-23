@@ -135,22 +135,27 @@
 │   ├── layout.tsx              # 站点语言、SEO、viewport、全局元数据
 │   ├── page.tsx                # 页面入口
 │   ├── RoomExperience.tsx      # Three 场景、交互、HUD、索引、详情页
+│   ├── ContentStudio.tsx       # 可视化内容工作台
+│   ├── content-config.ts       # 内容 schema、校验与双语合并
 │   ├── portfolio-data.ts       # 中文资产内容与共享类型
 │   ├── portfolio-data-en.ts    # 英文资产内容
 │   └── globals.css             # 完整视觉系统和响应式样式
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml          # GitHub 检查与 Cloudflare 自动部署
-├── public/
-│   └── models/
-│       └── README.md           # 后续 GLB 放置与命名规范
 ├── tests/
 │   └── rendered-html.test.mjs  # 构建产物与产品结构冒烟测试
 ├── ASSET_CREDITS.md            # 外部模型/材质授权归档
 ├── .openai/
 │   └── hosting.json            # Sites 项目标识与可选逻辑绑定
 ├── build/
+│   ├── content-studio-vite-plugin.ts # 仅本地开发可用的安全保存接口
 │   └── sites-vite-plugin.ts    # Sites 构建插件
+├── public/
+│   ├── content/
+│   │   └── site-content.json   # GUI 写入并随网站发布的内容覆盖
+│   └── models/
+│       └── README.md
 ├── worker/
 │   └── index.ts                # Cloudflare Worker 入口
 ├── vite.config.ts
@@ -242,6 +247,53 @@ npm test
 - Three.js、OrbitControls、Raycaster 和降级导航仍在产品源中；
 - 音乐、健身、阅读、未来等关键资产没有被误删。
 
+### 内容工作台 GUI
+
+先启动本地开发服务器，然后打开：
+
+```text
+http://localhost:3000/?studio=1
+```
+
+工作台首次打开后，房间 HUD 会保留“编辑 / Edit”入口。关闭面板不会退出编辑模式。
+
+可编辑内容：
+
+- 中文和英文展示名称、标志字母、品牌副标题；
+- 两种语言的首屏标题、介绍与引文；
+- 城市和时区；
+- 12 件数字资产的名称、章节标题、特质、摘要、介绍、状态、更新时间和引文；
+- 每件资产的数据指标；
+- 每件资产的内容卡片。
+
+保存方式：
+
+1. 每次输入都会即时更新当前页面；
+2. 草稿自动写入当前浏览器的 `localStorage`；
+3. 本地开发时点击“保存到项目”，会把规范化内容原子写入 `public/content/site-content.json`；
+4. Git 提交并推送该 JSON 后，GitHub Actions 会发布新内容；
+5. “导出”会下载完整 JSON，“导入”可恢复或迁移内容，“复制 JSON”适合手工备份。
+
+推荐发布流程：
+
+```bash
+git add public/content/site-content.json
+git commit -m "Update portfolio content"
+git push
+```
+
+安全边界：
+
+- 写入接口只存在于 `npm run dev`；
+- 只接受 loopback Host 与 Origin；
+- 请求必须是 JSON，最大 256KB；
+- 使用临时文件加 rename，避免写到一半损坏正式内容；
+- 生产构建没有这个 PUT 接口；
+- 线上工作台即使通过 `?studio=1` 打开，也只能本机预览、导入和导出；
+- 不在浏览器中保存 GitHub token、Cloudflare token 或密码。
+
+若“保存到项目”不可用，请确认页面来自 `localhost`，开发服务器是从当前代码仓库启动的；也可以先导出 JSON，再手动替换 `public/content/site-content.json`。
+
 ---
 
 ## 6. 最先需要替换的内容
@@ -250,16 +302,9 @@ npm test
 
 ### 6.1 姓名与首屏
 
-在 [`app/RoomExperience.tsx`](./app/RoomExperience.tsx) 搜索：
+推荐打开 `/?studio=1`，在“个人主页 / Profile”中同时编辑中英文姓名、城市、时区和介绍，再点击“保存到项目”。
 
-```text
-YOUR NAME
-你的名字
-SHANGHAI
-GMT+8
-```
-
-替换姓名、城市、时区和介绍。
+代码中的初始 fallback 位于 [`app/content-config.ts`](./app/content-config.ts) 的 `DEFAULT_PROFILE`；工作台生成的正式覆盖位于 [`public/content/site-content.json`](./public/content/site-content.json)。
 
 ### 6.2 SEO 元数据
 
@@ -275,7 +320,7 @@ GMT+8
 
 ### 6.3 十二个章节
 
-同步编辑：
+优先在内容工作台的“数字资产 / Digital assets”中编辑。若需要修改默认示例或调整数据结构，再同步编辑：
 
 - [`app/portfolio-data.ts`](./app/portfolio-data.ts)：中文；
 - [`app/portfolio-data-en.ts`](./app/portfolio-data-en.ts)：英文。
