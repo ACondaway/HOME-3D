@@ -1,5 +1,14 @@
 {
   "version": 1,
-  "profile": {},
+  "profile": {
+    "zh": {
+      "displayName": "徐聪晟",
+      "logoInitial": "A"
+    },
+    "en": {
+      "displayName": "ACondaway",
+      "logoInitial": "A"
+    }
+  },
   "assets": {}
 }
