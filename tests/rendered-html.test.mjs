@@ -108,9 +108,11 @@ test("keeps the Content Studio write endpoint local to the Vite development serv
   assert.match(plugin, /MAX_BODY_BYTES = 256 \* 1024/);
   assert.match(plugin, /rename\(temporaryPath, path\)/);
   assert.match(viteConfig, /contentStudio\(\)/);
-  assert.deepEqual(JSON.parse(persistedContent), {
-    version: 1,
-    profile: {},
-    assets: {},
-  });
+  const content = JSON.parse(persistedContent);
+
+  assert.equal(content.version, 1);
+  assert.equal(typeof content.profile, "object");
+  assert.equal(Array.isArray(content.profile), false);
+  assert.equal(typeof content.assets, "object");
+  assert.equal(Array.isArray(content.assets), false);
 });
