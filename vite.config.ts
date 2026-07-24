@@ -12,9 +12,9 @@ const { d1, r2 } = hostingConfig;
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
-const localBindingConfig = {
-  main: "./worker/index.ts",
-  compatibility_flags: ["nodejs_compat"],
+// Runtime fields live in wrangler.jsonc. Keep this inline config limited to
+// optional Sites bindings because the Cloudflare plugin concatenates arrays.
+const siteBindingConfig = {
   d1_databases: d1
     ? [
         {
@@ -23,7 +23,7 @@ const localBindingConfig = {
           database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
         },
       ]
-    : [],
+    : undefined,
   r2_buckets: r2
     ? [
         {
@@ -31,7 +31,7 @@ const localBindingConfig = {
           bucket_name: "site-creator-r2",
         },
       ]
-    : [],
+    : undefined,
 };
 
 export default defineConfig(async () => {
@@ -54,7 +54,7 @@ export default defineConfig(async () => {
       sites(),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: localBindingConfig,
+        config: siteBindingConfig,
       }),
     ],
   };

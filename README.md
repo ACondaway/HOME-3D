@@ -159,6 +159,7 @@
 ├── worker/
 │   └── index.ts                # Cloudflare Worker 入口
 ├── vite.config.ts
+├── wrangler.jsonc              # 唯一的 Cloudflare Worker 运行时配置
 ├── package.json
 └── README.md
 ```
@@ -964,6 +965,12 @@ CLOUDFLARE_ACCOUNT_ID
 4. 检查两个 Cloudflare secret 是否存在；
 5. 执行 `npm run deploy`；
 6. 使用 concurrency 取消同一生产环境中已过时的运行。
+
+Cloudflare 的 Worker 名称、入口、兼容日期、兼容标志和静态资源绑定统一保存在
+`wrangler.jsonc`。`nodejs_compat` 只能在这个文件中声明一次；不要再把
+`compatibility_flags` 添加到 `vite.config.ts` 的 `cloudflare({ config })`
+内联配置中，因为 Cloudflare Vite 插件会连接两处数组，重复标志将导致 API
+校验错误 `10021`。
 
 首次发布顺序：
 

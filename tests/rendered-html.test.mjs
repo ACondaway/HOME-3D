@@ -116,3 +116,21 @@ test("keeps the Content Studio write endpoint local to the Vite development serv
   assert.equal(typeof content.assets, "object");
   assert.equal(Array.isArray(content.assets), false);
 });
+
+test("declares each Cloudflare compatibility flag exactly once", async () => {
+  const [viteConfig, sourceConfig, generatedConfig] = await Promise.all([
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+    readFile(new URL("../dist/server/wrangler.json", import.meta.url), "utf8"),
+  ]);
+  const parsedSourceConfig = JSON.parse(sourceConfig);
+  const parsedGeneratedConfig = JSON.parse(generatedConfig);
+
+  assert.deepEqual(parsedSourceConfig.compatibility_flags, [
+    "nodejs_compat",
+  ]);
+  assert.deepEqual(parsedGeneratedConfig.compatibility_flags, [
+    "nodejs_compat",
+  ]);
+  assert.doesNotMatch(viteConfig, /compatibility_flags\s*:/);
+});
