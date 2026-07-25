@@ -31,8 +31,10 @@ tea-set-v3.glb
 - 导出前 Apply Rotation & Scale；
 - 去除无用节点、品牌 Logo 和未授权封面；
 - 普通资产尽量控制在 1–3 MB；
+- 单个 GLB 不得超过 24 MiB，并需内嵌缓冲区与纹理；
 - 普通纹理 512–1K，英雄资产 2K；
-- 优先 Meshopt，按设备验证 Draco / KTX2；
+- 嵌入纹理使用 PNG、JPEG 或 WebP；
+- 当前上传器与运行时不支持 Draco、Meshopt、BasisU / KTX2 或 AVIF；
 - 每个文件登记到项目根目录 `ASSET_CREDITS.md`；
 - 保留程序化模型作为加载失败 fallback；
 - 修改二进制内容时更新版本文件名，便于长缓存。

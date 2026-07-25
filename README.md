@@ -30,6 +30,9 @@
   <a href="./LICENSE">
     <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-c7a364?style=flat-square">
   </a>
+  <a href="./AGENTS.md">
+    <img alt="Agent-native skill pack" src="https://img.shields.io/badge/agent--native-skills%20included-17312b?style=flat-square">
+  </a>
 </p>
 
 <p>
@@ -85,8 +88,19 @@ Objects can be positioned through numeric controls or confirmed drag sessions ac
 
 ![Content Studio scene layout editor with editable room objects](./.github/assets/living-index-layout.jpg)
 
+## 🤖 Agent-native by design
+
+Fork the room, describe what you want to change, and let a coding agent work from the repository’s own skill pack. The included skills capture the content schema, bilingual editing model, Three.js scene conventions, asset safety rules, validation gates, and push-to-deploy workflow—so DIY starts with intent instead of architectural archaeology.
+
+| [`$living-index-content`](./skills/living-index-content/SKILL.md) | [`$living-index-scene`](./skills/living-index-scene/SKILL.md) | [`$living-index-developer`](./skills/living-index-developer/SKILL.md) |
+|---|---|---|
+| Profile, media, photography, Spotlight, social links, and composable cards. | Timezone lighting, object placement, GLB assets, and decorative/interactive behavior. | New framework capabilities, accessible interactions, tests, and safe delivery. |
+
+Start with the repository’s [coding agent guide](./AGENTS.md). Every skill is plain Markdown, inspectable, forkable, and MIT-licensed.
+
 ## 🧩 Highlights
 
+- 🤖 **Agent-native customization** — repository-owned skills turn natural-language intent into changes that respect the project’s real architecture and validation rules.
 - 🌐 **Bilingual by design** — Chinese and English share one spatial system while keeping independent editorial content.
 - ☀️ **Author-local lighting** — fixed GMT offsets and IANA timezones drive the clock, sun arc, twilight, and artificial lights.
 - 🪞 **Object-shaped storytelling** — twelve built-in room objects open distinct chapters and visual modules.
@@ -110,7 +124,7 @@ This README is the visual overview. Setup, local development, Content Studio wor
 
 ## 📄 License
 
-The source code is available under the [MIT License](./LICENSE). Third-party assets, if added, remain under their respective licenses and are documented in [ASSET_CREDITS.md](./ASSET_CREDITS.md).
+The source code and Agent Skills are available under the [MIT License](./LICENSE). Third-party assets, if added, remain under their respective licenses and are documented in [ASSET_CREDITS.md](./ASSET_CREDITS.md).
 
 <div align="center">
 

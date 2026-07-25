@@ -1,0 +1,4 @@
+interface:
+  display_name: "Living Index Content"
+  short_description: "Author bilingual portfolio content and media"
+  default_prompt: "Use $living-index-content to customize my bilingual portfolio content and media safely."

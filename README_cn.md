@@ -30,6 +30,9 @@
   <a href="./LICENSE">
     <img alt="MIT 开源许可" src="https://img.shields.io/badge/license-MIT-c7a364?style=flat-square">
   </a>
+  <a href="./AGENTS.md">
+    <img alt="Agent-native 技能包" src="https://img.shields.io/badge/agent--native-skills%20included-17312b?style=flat-square">
+  </a>
 </p>
 
 <p>
@@ -85,8 +88,19 @@ Content Studio 让个人主页保持可编辑，同时避免退化成一个通�
 
 ![Content Studio 场景布局编辑器](./.github/assets/living-index-layout.jpg)
 
+## 🤖 为 Coding Agent 原生设计
+
+Fork 这个项目后，只需描述你想改变的内容、物件或交互，Coding Agent 就可以依据仓库内置的 Agent Skills 工作。技能包沉淀了内容 schema、中英双语编辑模型、Three.js 场景约定、资产安全规则、验证门禁与 push-to-deploy 流程，让 DIY 从表达意图开始，而不是重新摸索代码结构。
+
+| [`$living-index-content`](./skills/living-index-content/SKILL.md) | [`$living-index-scene`](./skills/living-index-scene/SKILL.md) | [`$living-index-developer`](./skills/living-index-developer/SKILL.md) |
+|---|---|---|
+| 个人资料、媒体、摄影、Spotlight、社交链接与组合式卡片。 | 时区光照、物体摆放、GLB 资产与装饰/交互行为。 | 新框架能力、无障碍交互、测试与安全交付。 |
+
+从仓库内的 [Coding Agent 指南](./AGENTS.md) 开始。所有 skills 都是可检查、可修改、可复用并采用 MIT 许可的纯 Markdown。
+
 ## 🧩 功能亮点
 
+- 🤖 **Agent-native 定制** — 仓库内置 skills 将自然语言意图转化为遵循真实架构与验证规则的代码改动。
 - 🌐 **原生双语结构** — 中英文共享同一套空间与交互系统，同时保持独立的编辑内容。
 - ☀️ **作者时区光照** — GMT 固定偏移或 IANA 时区共同驱动时钟、太阳弧、晨昏与室内灯。
 - 🪞 **以物件组织叙事** — 十二件内置房间物件打开不同的内容章节与视觉模块。
@@ -110,7 +124,7 @@ README 只负责项目介绍与视觉预览。本地开发、Content Studio 工�
 
 ## 📄 开源许可
 
-本项目源代码依据 [MIT License](./LICENSE) 开源。后续加入的第三方资产仍遵循各自许可证，并记录于 [ASSET_CREDITS.md](./ASSET_CREDITS.md)。
+本项目源代码与 Agent Skills 均依据 [MIT License](./LICENSE) 开源。后续加入的第三方资产仍遵循各自许可证，并记录于 [ASSET_CREDITS.md](./ASSET_CREDITS.md)。
 
 <div align="center">
 

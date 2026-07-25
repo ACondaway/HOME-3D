@@ -1,0 +1,4 @@
+interface:
+  display_name: "Living Index Developer"
+  short_description: "Extend and ship the agent-native framework safely"
+  default_prompt: "Use $living-index-developer to implement and verify a new Living Index feature."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Living Index Scene"
+  short_description: "Compose objects, lighting, and 3D assets safely"
+  default_prompt: "Use $living-index-scene to add or arrange an object in my Living Index scene."
