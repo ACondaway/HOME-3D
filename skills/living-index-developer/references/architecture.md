@@ -7,6 +7,7 @@
 | Application entry | `app/page.tsx`, `app/layout.tsx` |
 | 3D runtime, routes, semantic index | `app/RoomExperience.tsx` |
 | Persisted schema and normalization | `app/content-config.ts` |
+| Generated published scene snapshot | `app/generated/scene-config.ts` |
 | Default editorial data | `app/portfolio-data.ts`, `app/portfolio-data-en.ts` |
 | Content and scene editors | `app/ContentStudio.tsx`, `app/SceneStudio.tsx`, `app/ContentCardEditor.tsx` |
 | Specialized modules | `app/AboutProfileModule.tsx`, `app/PhotographyGallery.tsx`, `app/SocialIcon.tsx` |
@@ -18,12 +19,17 @@
 ## State and routes
 
 - Mount the experience from `app/page.tsx`.
-- Load persisted overrides from `/content/site-content.json`.
+- Load editorial overrides from `/content/site-content.json`.
+- Overlay the published scene from `app/generated/scene-config.ts`; this
+  deterministic file is regenerated from the same normalized save request.
 - Open Content Studio with `?studio=1`.
 - Select locale with `?lang=zh|en`.
 - Open content with `?section=<asset-id>`.
 - Expect the local browser draft to override repository JSON until reset.
 - Keep production content endpoints read-only; local Vite middleware owns write/upload operations.
+- Keep GLB uploads staged outside `public` until save. The save transaction
+  promotes final references, regenerates scene source, and prunes only files
+  owned by the previous saved scene.
 
 ## Cross-layer contract
 

@@ -86,6 +86,8 @@ Content Studio keeps the portfolio editable without flattening it into a generic
 
 Objects can be positioned through numeric controls or confirmed drag sessions across floor movement, height, and heading modes. Imported assets may remain purely decorative or become interactive entrances with their own page content.
 
+GLBs preview from a disposable cache; **Save to project** promotes only the final references and regenerates a source-controlled scene module for review by people and coding agents.
+
 ![Content Studio scene layout editor with editable room objects](./.github/assets/living-index-layout.jpg)
 
 ## 🤖 Agent-native by design

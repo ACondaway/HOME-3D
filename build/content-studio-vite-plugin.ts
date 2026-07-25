@@ -1,11 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
 import type { Plugin, ViteDevServer } from "vite";
+import { parseSiteContent } from "../app/content-config.ts";
 
 const SAVE_ENDPOINT = "/__content-studio/save";
 const UPLOAD_ENDPOINT = "/__content-studio/upload";
+const MODEL_CACHE_ENDPOINT = "/__content-studio/model-cache";
 const MAX_SAVE_BODY_BYTES = 24 * 1024 * 1024;
 const MAX_IMAGE_UPLOAD_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_MODEL_UPLOAD_BODY_BYTES = 24 * 1024 * 1024;
@@ -25,6 +35,10 @@ const MAX_GLTF_TEXTURE_PIXELS = 32 * 1024 * 1024;
 const MAX_GLTF_TOTAL_TEXTURE_PIXELS = 64 * 1024 * 1024;
 const CONTENT_CARD_IMAGE_PATH_PATTERN =
   /^\/uploads\/cards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp|avif)$/i;
+const MODEL_UPLOAD_PATH_PATTERN =
+  /^\/uploads\/models\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.glb)$/;
+const MODEL_UPLOAD_FILENAME_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.glb$/;
 const GLB_JSON_CHUNK_TYPE = 0x4e4f534a;
 const GLB_BIN_CHUNK_TYPE = 0x004e4942;
 
@@ -38,6 +52,13 @@ const unsupportedGlbExtensions = new Set([
 
 type JsonRecord = Record<string, unknown>;
 type UploadKind = "profile" | "photography" | "cards" | "models";
+
+export interface ContentStudioProjectPaths {
+  saveDestination: string;
+  generatedSceneDestination: string;
+  uploadsRoot: string;
+  modelCacheRoot: string;
+}
 
 type ImageFormat = {
   extension: "jpg" | "png" | "webp" | "avif";
@@ -62,6 +83,96 @@ class RequestError extends Error {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOwn(value: JsonRecord, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
+async function isRegularFile(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isFile();
+  } catch (error) {
+    if (isMissingFileError(error)) return false;
+    throw error;
+  }
+}
+
+export function parseModelUploadFilename(
+  value: unknown,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return MODEL_UPLOAD_PATH_PATTERN.exec(value)?.[1]?.toLowerCase();
+}
+
+function modelUploadUrl(filename: string): string {
+  return `/uploads/models/${filename}`;
+}
+
+function modelPath(
+  directory: string,
+  modelUrl: string,
+): string | undefined {
+  const filename = parseModelUploadFilename(modelUrl);
+  return filename ? resolve(directory, filename) : undefined;
+}
+
+export function collectReferencedModelUploads(value: unknown): Set<string> {
+  const references = new Set<string>();
+  if (!isRecord(value) || !isRecord(value.scene)) return references;
+
+  const addReference = (candidate: unknown) => {
+    if (candidate === undefined) return;
+    const filename = parseModelUploadFilename(candidate);
+    if (!filename) {
+      throw new RequestError(
+        422,
+        "INVALID_MODEL_REFERENCE",
+        "Scene models must use a local /uploads/models/<uuid>.glb path.",
+      );
+    }
+    references.add(modelUploadUrl(filename));
+  };
+
+  const coreAssetModels = value.scene.coreAssetModels;
+  if (coreAssetModels !== undefined) {
+    if (!isRecord(coreAssetModels)) {
+      throw new RequestError(
+        422,
+        "INVALID_MODEL_REFERENCE",
+        "Scene coreAssetModels must be an object.",
+      );
+    }
+    for (const candidate of Object.values(coreAssetModels)) {
+      addReference(candidate);
+    }
+  }
+
+  const customAssets = value.scene.customAssets;
+  if (customAssets !== undefined) {
+    if (!Array.isArray(customAssets)) {
+      throw new RequestError(
+        422,
+        "INVALID_MODEL_REFERENCE",
+        "Scene customAssets must be an array.",
+      );
+    }
+    for (const asset of customAssets) {
+      if (isRecord(asset) && hasOwn(asset, "modelSrc")) {
+        addReference(asset.modelSrc);
+      }
+    }
+  }
+
+  return references;
 }
 
 function isIpv4Loopback(hostname: string): boolean {
@@ -1566,6 +1677,14 @@ export function validateContent(
     validateAssetContentCards(localeAssets);
   }
 
+  if (value.scene !== undefined && !isRecord(value.scene)) {
+    throw new RequestError(
+      422,
+      "INVALID_CONTENT",
+      'The optional "scene" property must be an object.',
+    );
+  }
+
   if (isRecord(value.scene) && Array.isArray(value.scene.customAssets)) {
     for (const asset of value.scene.customAssets) {
       if (!isRecord(asset) || !isRecord(asset.content)) continue;
@@ -1576,15 +1695,136 @@ export function validateContent(
       }
     }
   }
+
+  collectReferencedModelUploads(value);
 }
 
-async function atomicWriteJson(path: string, content: JsonRecord): Promise<void> {
+async function atomicWriteFile(
+  path: string,
+  content: string | Buffer,
+): Promise<void> {
   const directory = dirname(path);
   const temporaryPath = resolve(
     directory,
-    `.site-content.${process.pid}.${randomUUID()}.tmp`,
+    `.${process.pid}.${randomUUID()}.tmp`,
   );
-  const serialized = JSON.stringify(content);
+
+  await mkdir(directory, { recursive: true });
+
+  try {
+    await writeFile(temporaryPath, content, { flag: "wx" });
+    await rename(temporaryPath, path);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function readOptionalFile(path: string): Promise<Buffer | undefined> {
+  try {
+    return await readFile(path);
+  } catch (error) {
+    if (isMissingFileError(error)) return undefined;
+    throw error;
+  }
+}
+
+async function restoreFile(
+  path: string,
+  previousContent: Buffer | undefined,
+): Promise<void> {
+  if (previousContent === undefined) {
+    await rm(path, { force: true });
+    return;
+  }
+  await atomicWriteFile(path, previousContent);
+}
+
+export function serializeGeneratedSceneConfig(content: JsonRecord): string {
+  const scene = isRecord(content.scene) ? content.scene : {};
+  return `/**
+ * Generated by the local Content Studio.
+ *
+ * Scene placement and model references are source-controlled here so visual
+ * edits remain inspectable in the application code. Edit through the Studio
+ * and commit this file together with public/content/site-content.json.
+ */
+import type { SceneConfig } from "../content-config";
+
+export const PUBLISHED_SCENE_CONFIG: SceneConfig = ${JSON.stringify(
+    scene,
+    null,
+    2,
+  )};
+`;
+}
+
+function readPreviousModelReferences(
+  previousContent: Buffer | undefined,
+): Set<string> {
+  if (!previousContent) return new Set();
+  try {
+    return collectReferencedModelUploads(
+      JSON.parse(previousContent.toString("utf8")),
+    );
+  } catch {
+    // A malformed or legacy content file must never authorize deleting public
+    // models. The new document can still replace it conservatively.
+    return new Set();
+  }
+}
+
+async function clearStagedModelCache(modelCacheRoot: string): Promise<number> {
+  let entries;
+  try {
+    entries = await readdir(modelCacheRoot, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingFileError(error)) return 0;
+    throw error;
+  }
+
+  let removed = 0;
+  for (const entry of entries) {
+    if (!entry.isFile() || !MODEL_UPLOAD_FILENAME_PATTERN.test(entry.name)) {
+      continue;
+    }
+    await rm(resolve(modelCacheRoot, entry.name), { force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
+export async function discardStagedModelUpload(
+  modelCacheRoot: string,
+  modelUrl: unknown,
+): Promise<boolean> {
+  const filename = parseModelUploadFilename(modelUrl);
+  if (!filename) {
+    throw new RequestError(
+      422,
+      "INVALID_MODEL_REFERENCE",
+      "The staged model URL must use /uploads/models/<uuid>.glb.",
+    );
+  }
+
+  const stagedPath = resolve(modelCacheRoot, filename);
+  if (!(await isRegularFile(stagedPath))) return false;
+  await rm(stagedPath, { force: true });
+  return true;
+}
+
+export async function persistContentStudioProject(
+  content: unknown,
+  paths: ContentStudioProjectPaths,
+): Promise<{
+  promotedModels: number;
+  removedStagedModels: number;
+  removedPublishedModels: number;
+  cleanupFailures: number;
+}> {
+  validateContent(content);
+  const normalized = parseSiteContent(content);
+  const normalizedRecord = normalized as unknown as JsonRecord;
+  const serialized = JSON.stringify(normalized);
   if (Buffer.byteLength(serialized) > MAX_SAVE_BODY_BYTES) {
     throw new RequestError(
       413,
@@ -1593,23 +1833,109 @@ async function atomicWriteJson(path: string, content: JsonRecord): Promise<void>
     );
   }
 
-  await mkdir(directory, { recursive: true });
+  const generatedScene = serializeGeneratedSceneConfig(normalizedRecord);
+  const publicModelsRoot = resolve(paths.uploadsRoot, "models");
+  const nextReferences = collectReferencedModelUploads(normalizedRecord);
+  const previousContent = await readOptionalFile(paths.saveDestination);
+  const previousGeneratedScene = await readOptionalFile(
+    paths.generatedSceneDestination,
+  );
+  const previousReferences = readPreviousModelReferences(previousContent);
+  const promotions: Array<{
+    stagedPath: string;
+    publishedPath: string;
+  }> = [];
+
+  for (const modelUrl of nextReferences) {
+    const stagedPath = modelPath(paths.modelCacheRoot, modelUrl);
+    const publishedPath = modelPath(publicModelsRoot, modelUrl);
+    if (!stagedPath || !publishedPath) {
+      throw new RequestError(
+        422,
+        "INVALID_MODEL_REFERENCE",
+        "The saved scene contains an invalid model path.",
+      );
+    }
+    if (await isRegularFile(publishedPath)) continue;
+    if (!(await isRegularFile(stagedPath))) {
+      throw new RequestError(
+        422,
+        "MISSING_MODEL_UPLOAD",
+        `The model ${modelUrl} is neither staged nor published.`,
+      );
+    }
+    promotions.push({ stagedPath, publishedPath });
+  }
+
+  await mkdir(publicModelsRoot, { recursive: true });
+  const promoted: typeof promotions = [];
 
   try {
-    await writeFile(temporaryPath, serialized, {
-      encoding: "utf8",
-      flag: "wx",
-    });
-    await rename(temporaryPath, path);
-  } finally {
-    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    for (const promotion of promotions) {
+      await rename(promotion.stagedPath, promotion.publishedPath);
+      promoted.push(promotion);
+    }
+    await atomicWriteFile(paths.saveDestination, serialized);
+    await atomicWriteFile(paths.generatedSceneDestination, generatedScene);
+  } catch (error) {
+    const rollbackResults = await Promise.allSettled([
+      restoreFile(paths.saveDestination, previousContent),
+      restoreFile(paths.generatedSceneDestination, previousGeneratedScene),
+      ...promoted
+        .slice()
+        .reverse()
+        .map(async ({ stagedPath, publishedPath }) => {
+          await mkdir(dirname(stagedPath), { recursive: true });
+          await rename(publishedPath, stagedPath);
+        }),
+    ]);
+    const rollbackErrors = rollbackResults.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "The project save failed and could not be fully rolled back.",
+      );
+    }
+    throw error;
   }
+
+  let cleanupFailures = 0;
+  let removedPublishedModels = 0;
+  for (const modelUrl of previousReferences) {
+    if (nextReferences.has(modelUrl)) continue;
+    const publishedPath = modelPath(publicModelsRoot, modelUrl);
+    if (!publishedPath) continue;
+    try {
+      if (await isRegularFile(publishedPath)) {
+        await rm(publishedPath, { force: true });
+        removedPublishedModels += 1;
+      }
+    } catch {
+      cleanupFailures += 1;
+    }
+  }
+
+  let removedStagedModels = 0;
+  try {
+    removedStagedModels = await clearStagedModelCache(paths.modelCacheRoot);
+  } catch {
+    cleanupFailures += 1;
+  }
+
+  return {
+    promotedModels: promoted.length,
+    removedStagedModels,
+    removedPublishedModels,
+    cleanupFailures,
+  };
 }
 
 async function handlePut(
   request: IncomingMessage,
   response: ServerResponse,
-  destination: string,
+  paths: ContentStudioProjectPaths,
 ): Promise<void> {
   const contentType = request.headers["content-type"];
   if (
@@ -1640,13 +1966,14 @@ async function handlePut(
     throw new RequestError(400, "INVALID_JSON", "The request body is not valid JSON.");
   }
 
-  validateContent(parsed);
-  await atomicWriteJson(destination, parsed);
+  const result = await persistContentStudioProject(parsed, paths);
 
   sendJson(response, 200, {
     ok: true,
     saved: true,
     version: 1,
+    sceneSourceGenerated: true,
+    ...result,
   });
 }
 
@@ -1674,10 +2001,20 @@ async function atomicWriteUpload(
   return filename;
 }
 
+export async function stageModelUpload(
+  modelCacheRoot: string,
+  content: Buffer,
+): Promise<string> {
+  validateGlb(content);
+  const filename = await atomicWriteUpload(modelCacheRoot, content, "glb");
+  return modelUploadUrl(filename);
+}
+
 async function handleUpload(
   request: IncomingMessage,
   response: ServerResponse,
   uploadsRoot: string,
+  modelCacheRoot: string,
   kindValue: string | null,
 ): Promise<void> {
   if (!hasLoopbackOrigin(request.headers.origin)) {
@@ -1708,16 +2045,11 @@ async function handleUpload(
     }
 
     const body = await readBody(request, MAX_MODEL_UPLOAD_BODY_BYTES);
-    validateGlb(body);
-    const filename = await atomicWriteUpload(
-      resolve(uploadsRoot, kind),
-      body,
-      "glb",
-    );
+    const url = await stageModelUpload(modelCacheRoot, body);
 
     sendJson(response, 201, {
       ok: true,
-      url: `/uploads/${kind}/${filename}`,
+      url,
     });
     return;
   }
@@ -1763,6 +2095,86 @@ async function handleUpload(
   });
 }
 
+export async function readStagedModelPreview(
+  uploadsRoot: string,
+  modelCacheRoot: string,
+  modelUrl: unknown,
+): Promise<Buffer | undefined> {
+  const filename = parseModelUploadFilename(modelUrl);
+  if (!filename) return undefined;
+
+  const publishedPath = resolve(uploadsRoot, "models", filename);
+  if (await isRegularFile(publishedPath)) return undefined;
+
+  const stagedPath = resolve(modelCacheRoot, filename);
+  if (!(await isRegularFile(stagedPath))) return undefined;
+  try {
+    return await readFile(stagedPath);
+  } catch (error) {
+    if (isMissingFileError(error)) return undefined;
+    throw error;
+  }
+}
+
+async function serveStagedModel(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requestUrl: URL,
+  uploadsRoot: string,
+  modelCacheRoot: string,
+): Promise<boolean> {
+  if (
+    (request.method !== "GET" && request.method !== "HEAD") ||
+    requestUrl.search ||
+    requestUrl.hash
+  ) {
+    return false;
+  }
+
+  const filename = parseModelUploadFilename(requestUrl.pathname);
+  if (!filename) return false;
+
+  const body = await readStagedModelPreview(
+    uploadsRoot,
+    modelCacheRoot,
+    requestUrl.pathname,
+  );
+  if (!body) return false;
+
+  if (!hasLoopbackHost(request.headers.host)) {
+    sendJson(response, 403, {
+      ok: false,
+      error: {
+        code: "FORBIDDEN_HOST",
+        message: "Staged models are only available on loopback hosts.",
+      },
+    });
+    return true;
+  }
+  if (
+    request.headers.origin !== undefined &&
+    !hasLoopbackOrigin(request.headers.origin)
+  ) {
+    sendJson(response, 403, {
+      ok: false,
+      error: {
+        code: "FORBIDDEN_ORIGIN",
+        message: "Staged models are only available to loopback origins.",
+      },
+    });
+    return true;
+  }
+
+  response.writeHead(200, {
+    "Cache-Control": "no-store",
+    "Content-Type": "model/gltf-binary",
+    "Content-Length": body.byteLength.toString(),
+    "X-Content-Type-Options": "nosniff",
+  });
+  response.end(request.method === "HEAD" ? undefined : body);
+  return true;
+}
+
 function installMiddleware(server: ViteDevServer): void {
   const saveDestination = resolve(
     server.config.root,
@@ -1770,7 +2182,33 @@ function installMiddleware(server: ViteDevServer): void {
     "content",
     "site-content.json",
   );
+  const generatedSceneDestination = resolve(
+    server.config.root,
+    "app",
+    "generated",
+    "scene-config.ts",
+  );
   const uploadsRoot = resolve(server.config.root, "public", "uploads");
+  const modelCacheRoot = resolve(
+    server.config.root,
+    ".content-studio-cache",
+    "models",
+  );
+  const projectPaths: ContentStudioProjectPaths = {
+    saveDestination,
+    generatedSceneDestination,
+    uploadsRoot,
+    modelCacheRoot,
+  };
+  let mutationQueue: Promise<void> = Promise.resolve();
+  const enqueueMutation = <T,>(operation: () => Promise<T>): Promise<T> => {
+    const result = mutationQueue.then(operation, operation);
+    mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
 
   server.middlewares.use((request, response, next) => {
     let requestUrl: URL;
@@ -1782,9 +2220,42 @@ function installMiddleware(server: ViteDevServer): void {
       return;
     }
 
+    if (parseModelUploadFilename(requestUrl.pathname)) {
+      void serveStagedModel(
+        request,
+        response,
+        requestUrl,
+        uploadsRoot,
+        modelCacheRoot,
+      )
+        .then((served) => {
+          if (!served) next();
+        })
+        .catch((error: unknown) => {
+          if (response.headersSent) {
+            response.end();
+            return;
+          }
+          server.config.logger.error(
+            `[content-studio] Failed to preview staged model: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`,
+          );
+          sendJson(response, 500, {
+            ok: false,
+            error: {
+              code: "MODEL_PREVIEW_FAILED",
+              message: "The staged model could not be read.",
+            },
+          });
+        });
+      return;
+    }
+
     if (
       requestUrl.pathname !== SAVE_ENDPOINT &&
-      requestUrl.pathname !== UPLOAD_ENDPOINT
+      requestUrl.pathname !== UPLOAD_ENDPOINT &&
+      requestUrl.pathname !== MODEL_CACHE_ENDPOINT
     ) {
       next();
       return;
@@ -1815,6 +2286,73 @@ function installMiddleware(server: ViteDevServer): void {
       return;
     }
 
+    if (requestUrl.pathname === MODEL_CACHE_ENDPOINT) {
+      if (request.method !== "DELETE") {
+        sendJson(
+          response,
+          405,
+          {
+            ok: false,
+            error: {
+              code: "METHOD_NOT_ALLOWED",
+              message: "Only DELETE is supported.",
+            },
+          },
+          { Allow: "DELETE" },
+        );
+        return;
+      }
+      if (!hasLoopbackOrigin(request.headers.origin)) {
+        sendJson(response, 403, {
+          ok: false,
+          error: {
+            code: "FORBIDDEN_ORIGIN",
+            message: "The cache endpoint only accepts loopback origins.",
+          },
+        });
+        return;
+      }
+
+      void enqueueMutation(async () => {
+        const discarded = await discardStagedModelUpload(
+          modelCacheRoot,
+          requestUrl.searchParams.get("url"),
+        );
+        sendJson(response, 200, {
+          ok: true,
+          discarded,
+        });
+      }).catch((error: unknown) => {
+        if (response.headersSent) {
+          response.end();
+          return;
+        }
+        if (error instanceof RequestError) {
+          sendJson(response, error.status, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message,
+            },
+          });
+          return;
+        }
+        server.config.logger.error(
+          `[content-studio] Failed to discard staged model: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`,
+        );
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "MODEL_DISCARD_FAILED",
+            message: "The staged model could not be discarded.",
+          },
+        });
+      });
+      return;
+    }
+
     if (requestUrl.pathname === UPLOAD_ENDPOINT) {
       if (request.method !== "POST") {
         sendJson(
@@ -1832,11 +2370,14 @@ function installMiddleware(server: ViteDevServer): void {
         return;
       }
 
-      void handleUpload(
-        request,
-        response,
-        uploadsRoot,
-        requestUrl.searchParams.get("kind"),
+      void enqueueMutation(() =>
+        handleUpload(
+          request,
+          response,
+          uploadsRoot,
+          modelCacheRoot,
+          requestUrl.searchParams.get("kind"),
+        ),
       ).catch((error: unknown) => {
         if (response.headersSent) {
           response.end();
@@ -1899,7 +2440,9 @@ function installMiddleware(server: ViteDevServer): void {
       return;
     }
 
-    void handlePut(request, response, saveDestination).catch((error: unknown) => {
+    void enqueueMutation(() =>
+      handlePut(request, response, projectPaths),
+    ).catch((error: unknown) => {
       if (response.headersSent) {
         response.end();
         return;

@@ -49,7 +49,9 @@
 - Accept JPEG, PNG, WebP, or AVIF images up to 10 MiB, 10,000 px per side, and 40 megapixels.
 - Expect random UUID filenames under `public/uploads/profile`, `photography`, or `cards`.
 - Save after upload; upload alone only creates the file.
-- Expect unlink and delete operations not to remove the stored file.
+- For profile, photography, and card images, expect unlink and delete
+  operations not to remove the stored file. GLB models use the staged lifecycle
+  documented by `$living-index-scene`.
 - Keep `/__content-studio/save` and `/__content-studio/upload` loopback-only and development-only.
 - Keep saved JSON at or below 24 MiB.
 

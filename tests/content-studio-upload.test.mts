@@ -1,7 +1,27 @@
 import assert from "node:assert/strict";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
-const { parseUploadKind, validateContent, validateGlb } = (await import(
+const {
+  collectReferencedModelUploads,
+  discardStagedModelUpload,
+  parseModelUploadFilename,
+  parseUploadKind,
+  persistContentStudioProject,
+  readStagedModelPreview,
+  stageModelUpload,
+  validateContent,
+  validateGlb,
+} = (await import(
   new URL("../build/content-studio-vite-plugin.ts", import.meta.url).href
 )) as typeof import("../build/content-studio-vite-plugin");
 const {
@@ -16,6 +36,45 @@ type GlbDocument = Record<string, unknown>;
 
 const JSON_CHUNK_TYPE = 0x4e4f534a;
 const BIN_CHUNK_TYPE = 0x004e4942;
+
+function createProjectPaths(root: string) {
+  return {
+    saveDestination: resolve(root, "public", "content", "site-content.json"),
+    generatedSceneDestination: resolve(
+      root,
+      "app",
+      "generated",
+      "scene-config.ts",
+    ),
+    uploadsRoot: resolve(root, "public", "uploads"),
+    modelCacheRoot: resolve(root, ".content-studio-cache", "models"),
+  };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await readFile(path);
+    return true;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function siteContent(scene: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    profile: {},
+    assets: {},
+    scene,
+  };
+}
 
 test("reuses the selected model buffer after upload", async () => {
   const modelSrc =
@@ -431,4 +490,305 @@ test("distinguishes unsupported and malformed embedded images", () => {
     ),
     "INVALID_GLB_IMAGE",
   );
+});
+
+test("stages model previews outside public and discards only cache files", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "living-index-model-cache-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = createProjectPaths(root);
+  const body = makeGlb(triangleDocument(), Buffer.alloc(36));
+  const stagedUrl = await stageModelUpload(paths.modelCacheRoot, body);
+  const stagedFilename = parseModelUploadFilename(stagedUrl);
+
+  assert.ok(stagedFilename);
+  const stagedPath = resolve(paths.modelCacheRoot, stagedFilename);
+  const publishedPath = resolve(
+    paths.uploadsRoot,
+    "models",
+    stagedFilename,
+  );
+  assert.deepEqual(await readFile(stagedPath), body);
+  assert.equal(await pathExists(publishedPath), false);
+  assert.deepEqual(
+    await readStagedModelPreview(
+      paths.uploadsRoot,
+      paths.modelCacheRoot,
+      stagedUrl,
+    ),
+    body,
+  );
+  assert.equal(
+    await readStagedModelPreview(
+      paths.uploadsRoot,
+      paths.modelCacheRoot,
+      "/uploads/models/../../secret.glb",
+    ),
+    undefined,
+  );
+
+  const publishedUrl =
+    "/uploads/models/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.glb";
+  const publishedFilename = parseModelUploadFilename(publishedUrl);
+  assert.ok(publishedFilename);
+  const separatelyPublishedPath = resolve(
+    paths.uploadsRoot,
+    "models",
+    publishedFilename,
+  );
+  await mkdir(resolve(paths.uploadsRoot, "models"), { recursive: true });
+  await writeFile(separatelyPublishedPath, body);
+
+  assert.equal(
+    await discardStagedModelUpload(paths.modelCacheRoot, publishedUrl),
+    false,
+  );
+  assert.equal(await pathExists(separatelyPublishedPath), true);
+  assert.equal(
+    await discardStagedModelUpload(paths.modelCacheRoot, stagedUrl),
+    true,
+  );
+  assert.equal(await pathExists(stagedPath), false);
+  await assert.rejects(
+    () =>
+      discardStagedModelUpload(
+        paths.modelCacheRoot,
+        "/uploads/models/../../secret.glb",
+      ),
+    (error: unknown) => {
+      assert.equal(
+        typeof error === "object" && error !== null && "code" in error
+          ? error.code
+          : undefined,
+        "INVALID_MODEL_REFERENCE",
+      );
+      return true;
+    },
+  );
+});
+
+test("commits only referenced models and generates inspectable scene source", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "living-index-model-save-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = createProjectPaths(root);
+  const body = makeGlb(triangleDocument(), Buffer.alloc(36));
+  const firstUrl = await stageModelUpload(paths.modelCacheRoot, body);
+  const sharedUrl = await stageModelUpload(paths.modelCacheRoot, body);
+  const unusedUrl = await stageModelUpload(paths.modelCacheRoot, body);
+  const manualUrl =
+    "/uploads/models/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.glb";
+  const manualFilename = parseModelUploadFilename(manualUrl);
+  assert.ok(manualFilename);
+  const publicModelsRoot = resolve(paths.uploadsRoot, "models");
+  await mkdir(publicModelsRoot, { recursive: true });
+  const manualPath = resolve(publicModelsRoot, manualFilename);
+  await writeFile(manualPath, body);
+
+  const firstContent = siteContent({
+    placements: {
+      music: {
+        position: [1, 2, 3],
+        rotation: [0, 45, 0],
+        scale: [1, 1, 1],
+      },
+    },
+    coreAssetModels: {
+      music: firstUrl,
+    },
+    customAssets: [
+      {
+        id: "custom-shared-model",
+        behavior: "decorative",
+        accent: "#c99a62",
+        transform: {
+          position: [0, 0, 3.5],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+        },
+        content: {},
+        modelSrc: sharedUrl,
+      },
+    ],
+  });
+  const firstResult = await persistContentStudioProject(
+    firstContent,
+    paths,
+  );
+
+  assert.equal(firstResult.promotedModels, 2);
+  assert.equal(firstResult.removedStagedModels, 1);
+  assert.equal(firstResult.removedPublishedModels, 0);
+  assert.equal(firstResult.cleanupFailures, 0);
+  for (const modelUrl of [firstUrl, sharedUrl]) {
+    const filename = parseModelUploadFilename(modelUrl);
+    assert.ok(filename);
+    assert.equal(
+      await pathExists(resolve(publicModelsRoot, filename)),
+      true,
+    );
+  }
+  const unusedFilename = parseModelUploadFilename(unusedUrl);
+  assert.ok(unusedFilename);
+  assert.equal(
+    await pathExists(resolve(publicModelsRoot, unusedFilename)),
+    false,
+  );
+  assert.equal(await pathExists(manualPath), true);
+  assert.deepEqual(await readdir(paths.modelCacheRoot), []);
+
+  const replacementUrl = await stageModelUpload(paths.modelCacheRoot, body);
+  await stageModelUpload(paths.modelCacheRoot, body);
+  const nextContent = siteContent({
+    placements: {
+      music: {
+        position: [9, 1, -3],
+        rotation: [0, 90, 0],
+        scale: [1.25, 1.25, 1.25],
+      },
+    },
+    coreAssetModels: {
+      music: replacementUrl,
+      fitness: sharedUrl,
+    },
+    customAssets: [
+      {
+        id: "custom-shared-model",
+        behavior: "decorative",
+        accent: "#C99A62",
+        transform: {
+          position: [0, 0, 3.5],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+        },
+        content: {},
+        modelSrc: sharedUrl,
+      },
+    ],
+  });
+  const nextResult = await persistContentStudioProject(nextContent, paths);
+  const firstFilename = parseModelUploadFilename(firstUrl);
+  const sharedFilename = parseModelUploadFilename(sharedUrl);
+  const replacementFilename = parseModelUploadFilename(replacementUrl);
+  assert.ok(firstFilename && sharedFilename && replacementFilename);
+
+  assert.equal(nextResult.promotedModels, 1);
+  assert.equal(nextResult.removedStagedModels, 1);
+  assert.equal(nextResult.removedPublishedModels, 1);
+  assert.equal(await pathExists(resolve(publicModelsRoot, firstFilename)), false);
+  assert.equal(await pathExists(resolve(publicModelsRoot, sharedFilename)), true);
+  assert.equal(
+    await pathExists(resolve(publicModelsRoot, replacementFilename)),
+    true,
+  );
+  assert.equal(await pathExists(manualPath), true);
+
+  const savedContent = JSON.parse(
+    await readFile(paths.saveDestination, "utf8"),
+  ) as Record<string, unknown>;
+  assert.deepEqual(
+    Array.from(collectReferencedModelUploads(savedContent)).sort(),
+    [replacementUrl, sharedUrl].sort(),
+  );
+  const generatedScene = await readFile(
+    paths.generatedSceneDestination,
+    "utf8",
+  );
+  assert.match(
+    generatedScene,
+    /export const PUBLISHED_SCENE_CONFIG: SceneConfig =/,
+  );
+  assert.match(generatedScene, /"position": \[\s+9,\s+1,\s+-3\s+\]/);
+  assert.match(generatedScene, new RegExp(replacementFilename.replaceAll("-", "\\-")));
+});
+
+test("rejects missing model references before changing project files", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "living-index-model-rollback-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = createProjectPaths(root);
+  const body = makeGlb(triangleDocument(), Buffer.alloc(36));
+  const oldUrl =
+    "/uploads/models/cccccccc-cccc-4ccc-8ccc-cccccccccccc.glb";
+  const missingUrl =
+    "/uploads/models/dddddddd-dddd-4ddd-8ddd-dddddddddddd.glb";
+  const oldFilename = parseModelUploadFilename(oldUrl);
+  assert.ok(oldFilename);
+  const publicModelsRoot = resolve(paths.uploadsRoot, "models");
+  await mkdir(publicModelsRoot, { recursive: true });
+  const oldPublicPath = resolve(publicModelsRoot, oldFilename);
+  await writeFile(oldPublicPath, body);
+
+  const previousContent = JSON.stringify(
+    siteContent({
+      coreAssetModels: {
+        music: oldUrl,
+      },
+    }),
+  );
+  const previousGenerated = "export const previousScene = true;\n";
+  await mkdir(resolve(root, "public", "content"), { recursive: true });
+  await mkdir(resolve(root, "app", "generated"), { recursive: true });
+  await writeFile(paths.saveDestination, previousContent);
+  await writeFile(paths.generatedSceneDestination, previousGenerated);
+
+  const retryableUrl = await stageModelUpload(paths.modelCacheRoot, body);
+  const retryableFilename = parseModelUploadFilename(retryableUrl);
+  assert.ok(retryableFilename);
+  await assert.rejects(
+    () =>
+      persistContentStudioProject(
+        siteContent({
+          coreAssetModels: {
+            music: retryableUrl,
+            fitness: missingUrl,
+          },
+        }),
+        paths,
+      ),
+    (error: unknown) => {
+      assert.equal(
+        typeof error === "object" && error !== null && "code" in error
+          ? error.code
+          : undefined,
+        "MISSING_MODEL_UPLOAD",
+      );
+      return true;
+    },
+  );
+
+  assert.equal(await readFile(paths.saveDestination, "utf8"), previousContent);
+  assert.equal(
+    await readFile(paths.generatedSceneDestination, "utf8"),
+    previousGenerated,
+  );
+  assert.equal(await pathExists(oldPublicPath), true);
+  assert.equal(
+    await pathExists(resolve(publicModelsRoot, retryableFilename)),
+    false,
+  );
+  assert.equal(
+    await pathExists(resolve(paths.modelCacheRoot, retryableFilename)),
+    true,
+  );
+});
+
+test("generated scene source matches the checked-in published scene", async () => {
+  const [{ PUBLISHED_SCENE_CONFIG }, { parseSiteContent }] =
+    await Promise.all([
+      import(
+        new URL("../app/generated/scene-config.ts", import.meta.url).href
+      ),
+      import(new URL("../app/content-config.ts", import.meta.url).href),
+    ]);
+  const published = parseSiteContent(
+    JSON.parse(
+      await readFile(
+        new URL(
+          "../public/content/site-content.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ),
+  );
+
+  assert.deepEqual(PUBLISHED_SCENE_CONFIG, published.scene ?? {});
 });

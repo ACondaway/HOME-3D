@@ -10,6 +10,8 @@ This repository is designed to be customized with a coding agent. Read the small
 ## Repository map
 
 - `public/content/site-content.json`: persisted personal content and scene overrides
+- `app/generated/scene-config.ts`: Content Studio-generated, source-controlled
+  published scene snapshot
 - `app/content-config.ts`: schema, limits, normalization, and merge behavior
 - `app/portfolio-data*.ts`: bilingual template defaults
 - `app/RoomExperience.tsx`: Three.js runtime, routing, details, and semantic index
@@ -25,7 +27,7 @@ This repository is designed to be customized with a coding agent. Read the small
 4. Give every spatial interaction an equivalent semantic and keyboard path.
 5. Preserve reduced-motion, WebGL failure, and `noscript` behavior.
 6. Keep save/upload endpoints loopback-only and development-only.
-7. Treat uploaded files and JSON as one atomic change.
+7. Treat uploaded files, JSON, and generated scene source as one atomic change.
 8. Record third-party asset provenance in `ASSET_CREDITS.md`.
 
 ## Validation and delivery

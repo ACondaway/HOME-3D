@@ -11,7 +11,8 @@ Use the persisted scene schema for composition and the Three.js runtime only for
 
 1. Inspect `git status --short` and preserve unrelated work.
 2. Read `references/scene-system.md` before editing transforms, lighting, GLB files, or scene interactions.
-3. Inspect `app/content-config.ts`, `public/content/site-content.json`, and the relevant runtime/editor code.
+3. Inspect `app/content-config.ts`, `public/content/site-content.json`,
+   `app/generated/scene-config.ts`, and the relevant runtime/editor code.
 4. Classify the change:
    - Existing built-in object: write a relative `scene.placements` override,
      toggle it through `scene.disabledCoreAssets`, or replace only its visual
@@ -41,6 +42,9 @@ Use the persisted scene schema for composition and the Three.js runtime only for
    visual.
 10. Keep decorative assets visible but absent from hit targets, navigation, index, and detail routes.
 11. Give interactive assets localized labels and content cards; verify click, keyboard, index, and non-WebGL access.
+12. Use **Save to project** as the commit boundary. It writes the normalized
+    authoring document and regenerates `app/generated/scene-config.ts`; do not
+    hand-edit the generated scene module.
 
 ## Drive author-local light
 
@@ -53,8 +57,14 @@ Use the persisted scene schema for composition and the Three.js runtime only for
 
 1. Keep model paths local and same-origin.
 2. Record third-party provenance and licenses in `ASSET_CREDITS.md`.
-3. Expect upload unlink/removal to leave the binary file behind; audit orphaned files deliberately.
-4. Keep the procedural wireframe fallback working for missing or invalid models.
+3. Treat a selected GLB as a staged preview until **Save to project**. Only
+   model URLs still referenced by the final scene are promoted into
+   `public/uploads/models`.
+4. Expect replacement, unlink, custom-asset removal, and save to clear
+   uncommitted model cache entries. A successful save removes only previously
+   published GLBs that the prior saved scene referenced and the new scene no
+   longer references; never sweep arbitrary public files.
+5. Keep the procedural wireframe fallback working for missing or invalid models.
 
 ## Validate
 

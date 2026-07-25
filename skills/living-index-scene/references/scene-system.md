@@ -5,6 +5,7 @@
 | Concern | Source |
 |---|---|
 | Scene schema and merge behavior | `app/content-config.ts` |
+| Generated published scene source | `app/generated/scene-config.ts` |
 | Author-local light calculation | `app/solar-lighting.ts` |
 | Placement transactions | `app/scene-placement.ts` |
 | Three.js runtime | `app/RoomExperience.tsx` |
@@ -37,6 +38,10 @@
 - Confirm to merge changed axes; cancel to restore the saved transform.
 - Preserve concurrent edits, untouched axes, scale, siblings, and custom-asset metadata.
 - Finish placement before import, export, save, selection changes, or removal.
+- Saving writes the normalized scene to `public/content/site-content.json` and
+  deterministically regenerates `app/generated/scene-config.ts`. Published
+  runtime scene state comes from the generated module; the browser draft still
+  drives unsaved live preview.
 
 ## Author-local lighting
 
@@ -50,6 +55,15 @@
 ## GLB contract
 
 - Accept self-contained glTF 2.0 `.glb` files up to 24 MiB.
+- Stage validated uploads under `.content-studio-cache/models`; return their
+  eventual `/uploads/models/<uuid>.glb` URL so the same reference works in
+  preview and after commit.
+- Serve a staged model only from the loopback development server. Promote it
+  into `public/uploads/models` only when the final saved scene still references
+  it.
+- On save, clear every uncommitted staged GLB and remove only
+  `previousSavedReferences - nextSavedReferences` from public. Do not delete
+  unreferenced public files that were not owned by the previous saved scene.
 - Embed buffers and textures; reject external and data URI resources.
 - Use PNG, JPEG, or WebP embedded textures.
 - Reject Draco, Meshopt, BasisU/KTX2, and AVIF.
@@ -65,5 +79,6 @@
 - Treat a silently omitted transform, ID, accent, or path as a normalization failure first.
 - Use local `/uploads/models/<uuid>.glb` paths instead of remote URLs.
 - Check Network and the upload validator when the runtime only shows a placeholder.
-- Audit orphaned GLBs after unlinking or deleting configuration.
+- If a model unexpectedly survives, compare the prior and next saved reference
+  sets; cache cleanup must never become a broad public-directory sweep.
 - Verify decorative assets cannot open content and interactive assets remain available without precise 3D pointing.

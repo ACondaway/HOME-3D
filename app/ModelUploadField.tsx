@@ -35,6 +35,8 @@ interface ModelUploadFieldProps {
   loadState?: CustomModelLoadState;
   onUploaded: (url: string) => void;
   onClear: () => void;
+  onDiscardRequested: (url: string) => void;
+  onUploadActivityChange?: (delta: 1 | -1) => void;
 }
 
 export function ModelUploadField({
@@ -48,6 +50,8 @@ export function ModelUploadField({
   loadState,
   onUploaded,
   onClear,
+  onDiscardRequested,
+  onUploadActivityChange,
 }: ModelUploadFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -65,7 +69,7 @@ export function ModelUploadField({
           formats: "自包含 GLB（glTF 2.0），最大 24 MiB",
           uploading: "正在上传…",
           uploaded: "已上传，请保存到项目",
-          fetching: "文件已写入，正在读取模型…",
+          fetching: "正在从暂存缓存读取模型…",
           processing: "正在解析网格与纹理…",
           ready: "模型已在场景中显示",
           coreReadyInactive: "替换模型已就绪；重新激活后显示",
@@ -75,8 +79,10 @@ export function ModelUploadField({
             parse: "模型已上传，但浏览器无法解析",
             "empty-scene": "模型没有可显示的场景内容",
           },
-          unlinked: "已解除引用；模型文件仍保留在项目中",
-          coreUnlinked: "已恢复原生外观；上传文件仍保留在项目中",
+          unlinked:
+            "已解除引用；未保存缓存会立即或在保存时清理，已发布文件会在保存时移除",
+          coreUnlinked:
+            "已恢复原生外观；未保存缓存会立即或在保存时清理，已发布文件会在保存时移除",
           tooLarge: "模型不能超过 24 MiB",
           invalid: "无法上传，请使用有效的 glTF 2.0 GLB 文件",
           selfContained:
@@ -100,7 +106,7 @@ export function ModelUploadField({
           formats: "Self-contained GLB (glTF 2.0) · 24 MiB max",
           uploading: "Uploading…",
           uploaded: "Uploaded — save to project",
-          fetching: "File saved — reading the model…",
+          fetching: "Reading the model from the preview cache…",
           processing: "Processing geometry and textures…",
           ready: "Model is visible in the scene",
           coreReadyInactive:
@@ -111,9 +117,10 @@ export function ModelUploadField({
             parse: "The model uploaded, but the browser could not parse it",
             "empty-scene": "The model does not contain a visible scene",
           },
-          unlinked: "Reference removed — the model file remains in the project",
+          unlinked:
+            "Reference removed — preview cache is cleared now or on save; the published file is removed on save",
           coreUnlinked:
-            "Native visual restored — the uploaded file remains in the project",
+            "Native visual restored — preview cache is cleared now or on save; the published file is removed on save",
           tooLarge: "Models must be 24 MiB or smaller",
           invalid: "Upload failed. Use a valid glTF 2.0 GLB file",
           selfContained:
@@ -176,6 +183,7 @@ export function ModelUploadField({
     }
 
     setUploading(true);
+    onUploadActivityChange?.(1);
     setMessage("");
     const preparedUpload = prepareModelUpload(file);
     try {
@@ -203,11 +211,15 @@ export function ModelUploadField({
 
       rememberPreparedModelUpload(payload.url, preparedUpload);
       onUploaded(payload.url);
+      if (value && value !== payload.url) {
+        onDiscardRequested(value);
+      }
       setMessage(copy.uploaded);
     } catch {
       setMessage(copy.invalid);
     } finally {
       setUploading(false);
+      onUploadActivityChange?.(-1);
     }
   };
 
@@ -319,6 +331,7 @@ export function ModelUploadField({
                 onClick={() => {
                   forgetPreparedModelUpload(value);
                   onClear();
+                  onDiscardRequested(value);
                   setMessage(unlinkedMessage);
                 }}
                 disabled={uploading}

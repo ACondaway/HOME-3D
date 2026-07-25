@@ -76,3 +76,22 @@ export function takePreparedModelUpload(
 export function forgetPreparedModelUpload(modelSrc: string): void {
   deletePreparedModelUpload(modelSrc);
 }
+
+export async function discardStagedModelUpload(
+  modelSrc: string,
+): Promise<boolean> {
+  forgetPreparedModelUpload(modelSrc);
+  try {
+    const response = await fetch(
+      `/__content-studio/model-cache?url=${encodeURIComponent(modelSrc)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    return response.ok;
+  } catch {
+    // Saving performs a full mark-and-sweep, so an eager cleanup failure does
+    // not leave the project in a partially committed state.
+    return false;
+  }
+}

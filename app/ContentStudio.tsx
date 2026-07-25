@@ -147,7 +147,7 @@ const TEXT = {
     copy: "复制 JSON",
     save: "保存到项目",
     saving: "正在保存",
-    saved: "已写入项目",
+    saved: "内容、场景源码与最终资产已写入项目",
     localOnly: "线上模式仅支持导入与导出",
     reset: "重置草稿",
     confirmReset: "再次点击确认",
@@ -156,6 +156,7 @@ const TEXT = {
     exported: "JSON 已导出",
     copied: "JSON 已复制",
     finishPlacement: "请先确认或取消当前物体的摆放",
+    finishUpload: "请等待当前 GLB 完成暂存后再保存",
     invalid: "文件不是有效的内容配置",
     invalidSocial: "请先为每个社交链接填写有效地址",
     invalidCardLinks:
@@ -230,7 +231,7 @@ const TEXT = {
     copy: "Copy JSON",
     save: "Save to project",
     saving: "Saving",
-    saved: "Written to project",
+    saved: "Content, scene source, and final assets written to the project",
     localOnly: "Production mode supports import and export only",
     reset: "Reset draft",
     confirmReset: "Click again to confirm",
@@ -239,6 +240,7 @@ const TEXT = {
     exported: "JSON exported",
     copied: "JSON copied",
     finishPlacement: "Confirm or cancel the current placement first",
+    finishUpload: "Wait for the current GLB upload before saving",
     invalid: "That file is not a valid content configuration",
     invalidSocial: "Add a valid URL for every social link before saving",
     invalidCardLinks:
@@ -381,6 +383,7 @@ export function ContentStudio({
   const [selectedId, setSelectedId] = useState<CoreAssetId>("music");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [activeModelUploads, setActiveModelUploads] = useState(0);
   const [projectWritable, setProjectWritable] = useState(false);
   const [projectMaxBytes, setProjectMaxBytes] = useState(
     MAX_CONTENT_SAVE_BYTES,
@@ -861,6 +864,10 @@ export function ContentStudio({
       setStatus(text.finishPlacement);
       return;
     }
+    if (activeModelUploads > 0) {
+      setStatus(text.finishUpload);
+      return;
+    }
     if (hasInvalidSocialLinks) {
       setStatus(text.invalidSocial);
       return;
@@ -1041,10 +1048,17 @@ export function ContentStudio({
               type="button"
               className="studio-save-button"
               onClick={() => void saveProject()}
-              disabled={!projectWritable || saving || Boolean(placementEdit)}
+              disabled={
+                !projectWritable ||
+                saving ||
+                activeModelUploads > 0 ||
+                Boolean(placementEdit)
+              }
               title={
                 placementEdit
                   ? text.finishPlacement
+                  : activeModelUploads > 0
+                    ? text.finishUpload
                   : projectWritable
                     ? undefined
                     : text.localOnly
@@ -1567,7 +1581,7 @@ export function ContentStudio({
                 locale={locale}
                 config={config}
                 assets={coreAssets}
-                projectWritable={projectWritable}
+                projectWritable={projectWritable && !saving}
                 modelLoadStates={modelLoadStates}
                 placementEdit={placementEdit}
                 onChange={onChange}
@@ -1578,6 +1592,11 @@ export function ContentStudio({
                 onPlacementModeChange={onPlacementModeChange}
                 onPlacementEditConfirm={onPlacementEditConfirm}
                 onPlacementEditCancel={onPlacementEditCancel}
+                onModelUploadActivityChange={(delta) =>
+                  setActiveModelUploads((current) =>
+                    Math.max(0, current + delta),
+                  )
+                }
               />
             )}
           </div>

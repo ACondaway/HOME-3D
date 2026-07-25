@@ -24,7 +24,10 @@ import {
   type SiteContentConfig,
 } from "./content-config";
 import { ModelUploadField } from "./ModelUploadField";
-import type { CustomModelLoadState } from "./model-loading";
+import {
+  discardStagedModelUpload,
+  type CustomModelLoadState,
+} from "./model-loading";
 import {
   isAssetId,
   type CoreAssetId,
@@ -48,6 +51,7 @@ interface SceneStudioProps {
   onPlacementModeChange: (mode: ScenePlacementMode) => void;
   onPlacementEditConfirm: () => void;
   onPlacementEditCancel: () => void;
+  onModelUploadActivityChange: (delta: 1 | -1) => void;
 }
 
 type TransformKey = keyof SceneTransform;
@@ -98,6 +102,19 @@ function createCustomAssetId(): CustomSceneAsset["id"] {
 
 function cloneVector(vector: SceneVector3): SceneVector3 {
   return [vector[0], vector[1], vector[2]];
+}
+
+function countModelReferences(
+  config: SiteContentConfig,
+  modelSrc: string,
+): number {
+  const coreReferences = Object.values(
+    config.scene?.coreAssetModels ?? {},
+  ).filter((candidate) => candidate === modelSrc).length;
+  const customReferences = (config.scene?.customAssets ?? []).filter(
+    (asset) => asset.modelSrc === modelSrc,
+  ).length;
+  return coreReferences + customReferences;
 }
 
 function createDefaultCustomAsset(): CustomSceneAsset {
@@ -341,6 +358,7 @@ export function SceneStudio({
   onPlacementModeChange,
   onPlacementEditConfirm,
   onPlacementEditCancel,
+  onModelUploadActivityChange,
 }: SceneStudioProps) {
   const copy =
     locale === "zh"
@@ -405,7 +423,8 @@ export function SceneStudio({
             "只有“可交互”资产会进入索引、响应悬停并打开详情页。",
           remove: "移除自定义资产",
           confirmRemove: "再次点击确认移除",
-          removeHelp: "移除只删除配置引用，已经上传的 GLB 文件仍保留在项目中。",
+          removeHelp:
+            "移除会清理未保存的 GLB 缓存；已经发布的模型会在下次保存时从项目中移除。",
           metrics: "数据指标",
           entries: "内容卡片",
           addMetric: "添加指标",
@@ -491,7 +510,7 @@ export function SceneStudio({
           remove: "Remove custom asset",
           confirmRemove: "Click again to confirm removal",
           removeHelp:
-            "Removing an asset only clears its configuration; an uploaded GLB remains in the project.",
+            "Removing an asset clears its uncommitted GLB cache; a published model is removed from the project on the next save.",
           metrics: "Metrics",
           entries: "Content cards",
           addMetric: "Add metric",
@@ -523,6 +542,10 @@ export function SceneStudio({
     () => config.scene?.customAssets ?? [],
     [config.scene?.customAssets],
   );
+  const discardModelIfUnshared = (modelSrc: string) => {
+    if (countModelReferences(config, modelSrc) > 1) return;
+    void discardStagedModelUpload(modelSrc);
+  };
   const disabledCoreAssetIds = useMemo(
     () => new Set(config.scene?.disabledCoreAssets ?? []),
     [config.scene?.disabledCoreAssets],
@@ -726,6 +749,10 @@ export function SceneStudio({
 
   const removeCustomAsset = (id: CustomSceneAsset["id"]) => {
     if (placementEdit?.assetId === id) onPlacementEditCancel();
+    const removedModelSrc = customAssets.find(
+      (asset) => asset.id === id,
+    )?.modelSrc;
+    if (removedModelSrc) discardModelIfUnshared(removedModelSrc);
     setPendingRemovalId(null);
     onChange((current) => ({
       ...current,
@@ -1089,6 +1116,8 @@ export function SceneStudio({
               onClear={() =>
                 updateCoreAssetModel(selectedCoreId, undefined)
               }
+              onDiscardRequested={discardModelIfUnshared}
+              onUploadActivityChange={onModelUploadActivityChange}
             />
           </StudioSection>
         </>
@@ -1169,6 +1198,8 @@ export function SceneStudio({
                   return next;
                 })
               }
+              onDiscardRequested={discardModelIfUnshared}
+              onUploadActivityChange={onModelUploadActivityChange}
             />
           </StudioSection>
 

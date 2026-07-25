@@ -70,8 +70,23 @@ import {
   type CustomModelLoadError,
   type CustomModelLoadState,
 } from "./model-loading";
+import { PUBLISHED_SCENE_CONFIG } from "./generated/scene-config";
 
 type Locale = ContentLocale;
+
+const PUBLISHED_CONTENT_FALLBACK = parseSiteContent({
+  ...EMPTY_SITE_CONTENT,
+  scene: PUBLISHED_SCENE_CONFIG,
+});
+
+function applyPublishedScene(
+  content: SiteContentConfig,
+): SiteContentConfig {
+  return parseSiteContent({
+    ...content,
+    scene: PUBLISHED_SCENE_CONFIG,
+  });
+}
 
 const COPY = {
   zh: {
@@ -4047,9 +4062,9 @@ function HelpPanel({
 export default function RoomExperience() {
   const [locale, setLocale] = useState<Locale>("zh");
   const [contentConfig, setContentConfig] =
-    useState<SiteContentConfig>(EMPTY_SITE_CONTENT);
+    useState<SiteContentConfig>(PUBLISHED_CONTENT_FALLBACK);
   const [publishedContent, setPublishedContent] =
-    useState<SiteContentConfig>(EMPTY_SITE_CONTENT);
+    useState<SiteContentConfig>(PUBLISHED_CONTENT_FALLBACK);
   const [contentLoaded, setContentLoaded] = useState(false);
   const [studioEnabled, setStudioEnabled] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);
@@ -4177,17 +4192,19 @@ export default function RoomExperience() {
     let cancelled = false;
 
     const loadContent = async () => {
-      let published = EMPTY_SITE_CONTENT;
+      let published = PUBLISHED_CONTENT_FALLBACK;
 
       try {
         const response = await fetch("/content/site-content.json", {
           cache: "no-store",
         });
         if (response.ok) {
-          published = parseSiteContent(await response.json());
+          published = applyPublishedScene(
+            parseSiteContent(await response.json()),
+          );
         }
       } catch {
-        published = EMPTY_SITE_CONTENT;
+        published = PUBLISHED_CONTENT_FALLBACK;
       }
 
       let next = published;
