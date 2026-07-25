@@ -40,7 +40,7 @@
 
 </div>
 
-<img src=".github/assets/living-index-hero.jpg" alt="The Living Index 当前应用的首屏" width="100%">
+![The Living Index 当前应用的首屏](./.github/assets/living-index-hero.jpg)
 
 ## ✦ 一个可以进入的作品集
 
@@ -83,7 +83,7 @@ Content Studio 让个人主页保持可编辑，同时避免退化成一个通�
 
 物件既可以通过数值精确设置，也可以进入可确认的拖动会话，分别调整平面位置、高度和方向旋转。导入的资产可以只作为装饰，也可以成为拥有独立内容页面的交互入口。
 
-<img src=".github/assets/living-index-layout.jpg" alt="Content Studio 场景布局编辑器" width="100%">
+![Content Studio 场景布局编辑器](./.github/assets/living-index-layout.jpg)
 
 ## 🧩 功能亮点
 

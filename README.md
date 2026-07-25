@@ -40,7 +40,7 @@
 
 </div>
 
-<img src=".github/assets/living-index-hero.jpg" alt="The Living Index opening screen, rendered from the current application" width="100%">
+![The Living Index opening screen, rendered from the current application](./.github/assets/living-index-hero.jpg)
 
 ## ✦ A portfolio you can enter
 
@@ -83,7 +83,7 @@ Content Studio keeps the portfolio editable without flattening it into a generic
 
 Objects can be positioned through numeric controls or confirmed drag sessions across floor movement, height, and heading modes. Imported assets may remain purely decorative or become interactive entrances with their own page content.
 
-<img src=".github/assets/living-index-layout.jpg" alt="Content Studio scene layout editor with editable room objects" width="100%">
+![Content Studio scene layout editor with editable room objects](./.github/assets/living-index-layout.jpg)
 
 ## 🧩 Highlights
 
