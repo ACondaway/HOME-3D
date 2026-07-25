@@ -142,9 +142,9 @@ const TEXT = {
     addSocialLink: "添加社交链接",
     photographyEntries: "摄影相纸",
     photographyHelp:
-      "上传照片、选择 Spotlight；系列说明只会在访客点击相纸后显示。",
+      "所有照片都会展示；常规说明在打开相纸后显示，Spotlight 说明还会出现在专属介绍栏。",
     spotlight: "设为 Spotlight",
-    spotlightHelp: "Spotlight 会在摄影接触印样中优先放大展示。",
+    spotlightHelp: "Spotlight 会在摄影页获得大图和专门的文字介绍栏。",
     metrics: "数据指标",
     entries: "内容卡片",
     addMetric: "添加指标",
@@ -220,10 +220,10 @@ const TEXT = {
     addSocialLink: "Add social link",
     photographyEntries: "Instant photos",
     photographyHelp:
-      "Upload each image and choose a Spotlight. Series notes appear only after a visitor opens an instant photo.",
+      "Every photo is displayed. Regular notes appear inside the instant photo, while the Spotlight note also appears in its own introduction column.",
     spotlight: "Set as Spotlight",
     spotlightHelp:
-      "The Spotlight image receives the largest position in the contact sheet.",
+      "The Spotlight receives a large image and its own introduction column on the photography page.",
     metrics: "Metrics",
     entries: "Content cards",
     addMetric: "Add metric",

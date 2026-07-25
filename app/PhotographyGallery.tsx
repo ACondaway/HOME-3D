@@ -157,7 +157,7 @@ export function PhotographyGallery({
         <header className="photography-sheet-header">
           <span>CONTACT SHEET / {String(photos.length).padStart(2, "0")}</span>
           <span>
-            {locale === "zh" ? "点击照片查看相纸" : "SELECT A FRAME"}
+            {locale === "zh" ? "点击任意照片查看相纸" : "SELECT ANY FRAME"}
           </span>
         </header>
         <div className="photography-sheet-grid">
@@ -169,12 +169,54 @@ export function PhotographyGallery({
               "--photo-order": index,
             } as CSSProperties;
 
+            if (isSpotlight) {
+              return (
+                <article
+                  className="photography-spotlight-feature"
+                  key={photo.id}
+                  style={tileStyle}
+                >
+                  <button
+                    type="button"
+                    className={`photography-spotlight-frame photo-variant-${
+                      (photo.originalIndex % 6) + 1
+                    }`}
+                    onClick={(event) => {
+                      activeTriggerRef.current = event.currentTarget;
+                      setSelectedId(photo.id);
+                    }}
+                    aria-label={
+                      locale === "zh"
+                        ? `打开 Spotlight 相纸：${photo.entry.title}`
+                        : `Open Spotlight instant photo: ${photo.entry.title}`
+                    }
+                  >
+                    <PhotoImage source={photo.source} alt={alt} />
+                    <span className="photography-tile-index">
+                      {String(photo.originalIndex + 1).padStart(2, "0")}
+                    </span>
+                    <span className="photography-spotlight-label">
+                      SPOTLIGHT
+                    </span>
+                  </button>
+                  <div className="photography-spotlight-copy">
+                    <div>
+                      <p>{photo.entry.eyebrow}</p>
+                      <h3>{photo.entry.title}</h3>
+                      <div>{photo.entry.body}</div>
+                    </div>
+                    <span>{photo.entry.meta}</span>
+                  </div>
+                </article>
+              );
+            }
+
             return (
               <button
                 type="button"
-                className={`photography-tile ${
-                  isSpotlight ? "is-spotlight" : ""
-                } photo-variant-${(photo.originalIndex % 6) + 1}`}
+                className={`photography-tile photo-variant-${
+                  (photo.originalIndex % 6) + 1
+                }`}
                 key={photo.id}
                 style={tileStyle}
                 onClick={(event) => {
@@ -191,11 +233,6 @@ export function PhotographyGallery({
                 <span className="photography-tile-index">
                   {String(photo.originalIndex + 1).padStart(2, "0")}
                 </span>
-                {isSpotlight && (
-                  <span className="photography-spotlight-label">
-                    SPOTLIGHT
-                  </span>
-                )}
                 <strong>{photo.entry.title}</strong>
               </button>
             );

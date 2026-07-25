@@ -110,6 +110,9 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(aboutProfile, /noopener noreferrer/);
   assert.match(photographyGallery, /instant-photo-dialog/);
   assert.match(photographyGallery, /aria-modal="true"/);
+  assert.match(photographyGallery, /photography-spotlight-feature/);
+  assert.match(photographyGallery, /photography-spotlight-copy/);
+  assert.match(photographyGallery, /orderedPhotos\.map/);
   assert.match(room, /asset\.id !== "photography"/);
   assert.match(contentConfig, /normalizeSiteContent/);
   assert.match(contentConfig, /mergeAssets/);
