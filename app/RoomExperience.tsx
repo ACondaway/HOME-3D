@@ -11,12 +11,14 @@ import {
 } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
   ASSET_BY_ID,
   CATEGORY_ORDER,
   PORTFOLIO_ASSETS,
   isAssetId,
   type AssetId,
+  type CoreAssetId,
   type PortfolioAsset,
 } from "./portfolio-data";
 import {
@@ -25,13 +27,18 @@ import {
 } from "./portfolio-data-en";
 import {
   EMPTY_SITE_CONTENT,
+  mergeCustomSceneAssets,
   mergeAssets,
   mergeMedia,
   mergeProfile,
+  mergeSceneConfig,
   mergeSocialLinks,
   parseSiteContent,
+  type CustomSceneAsset,
   type ContentLocale,
   type ProfileContent,
+  type SceneConfig,
+  type ScenePlacement,
   type SiteContentConfig,
   type SiteMediaConfig,
   type SocialLink,
@@ -191,7 +198,7 @@ const COPY = {
 const DEFAULT_CAMERA = new THREE.Vector3(11.8, 7.1, 14.5);
 const DEFAULT_TARGET = new THREE.Vector3(0, 1.25, -1.35);
 
-const MARKER_POSITIONS: Record<AssetId, [number, number, number]> = {
+const MARKER_POSITIONS: Record<CoreAssetId, [number, number, number]> = {
   music: [-5.0, 0.18, -3.6],
   fitness: [5.2, 0.18, 1.6],
   reading: [5.45, 0.18, -4.15],
@@ -209,11 +216,14 @@ const MARKER_POSITIONS: Record<AssetId, [number, number, number]> = {
 interface SceneHandle {
   focus: (id: AssetId | null) => void;
   reset: () => void;
+  sync: (sceneConfig: SceneConfig, assets: PortfolioAsset[]) => void;
 }
 
 interface RoomSceneProps {
   activeId: AssetId | null;
+  assets: PortfolioAsset[];
   resetSignal: number;
+  sceneConfig: SceneConfig;
   sceneLabel: string;
   timeZone: string;
   onSelect: (id: AssetId) => void;
@@ -234,6 +244,39 @@ interface RoomShellLighting {
 interface SceneAssetLighting {
   deskLampMaterial: THREE.MeshStandardMaterial;
 }
+
+interface CoreSceneRuntime {
+  id: CoreAssetId;
+  root: THREE.Object3D;
+  defaultPosition: THREE.Vector3;
+  defaultRotation: THREE.Euler;
+  defaultScale: THREE.Vector3;
+  defaultWorldMatrixInverse: THREE.Matrix4;
+  markerLocalPosition: THREE.Vector3;
+}
+
+interface CustomSceneRuntime {
+  id: CustomSceneAsset["id"];
+  root: THREE.Group;
+  placeholder: THREE.Mesh<
+    THREE.BoxGeometry,
+    THREE.MeshStandardMaterial
+  >;
+  localBounds: THREE.Box3;
+  model?: THREE.Object3D;
+  modelSrc?: string;
+  hitbox?: THREE.Mesh<THREE.BoxGeometry, THREE.MeshBasicMaterial>;
+  signal?: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+  loadController?: AbortController;
+  loadVersion: number;
+}
+
+const DEGREES_TO_RADIANS = Math.PI / 180;
+const MAX_RUNTIME_MODEL_BYTES = 24 * 1024 * 1024;
+const FALLBACK_MODEL_BOUNDS = new THREE.Box3(
+  new THREE.Vector3(-0.5, 0, -0.5),
+  new THREE.Vector3(0.5, 1, 0.5),
+);
 
 function standardMaterial(
   color: THREE.ColorRepresentation,
@@ -334,7 +377,7 @@ function addSphere(
 
 function addHitbox(
   parent: THREE.Object3D,
-  id: AssetId,
+  id: CoreAssetId,
   size: [number, number, number],
   position: [number, number, number],
   hitboxes: THREE.Mesh[],
@@ -358,7 +401,11 @@ function addHitbox(
   return mesh;
 }
 
-function addSignal(parent: THREE.Object3D, id: AssetId, position: [number, number, number]) {
+function addSignal(
+  parent: THREE.Object3D,
+  id: CoreAssetId,
+  position: [number, number, number],
+) {
   const material = new THREE.MeshBasicMaterial({
     color: ASSET_BY_ID[id].accent,
     transparent: true,
@@ -371,6 +418,97 @@ function addSignal(parent: THREE.Object3D, id: AssetId, position: [number, numbe
   signal.position.set(...position);
   parent.add(signal);
   return signal;
+}
+
+function applyCorePlacement(
+  runtime: CoreSceneRuntime,
+  placement?: ScenePlacement,
+) {
+  const position = placement?.position ?? [0, 0, 0];
+  const rotation = placement?.rotation ?? [0, 0, 0];
+  const scale = placement?.scale ?? [1, 1, 1];
+
+  runtime.root.position.set(
+    runtime.defaultPosition.x + position[0],
+    runtime.defaultPosition.y + position[1],
+    runtime.defaultPosition.z + position[2],
+  );
+  runtime.root.rotation.set(
+    runtime.defaultRotation.x + rotation[0] * DEGREES_TO_RADIANS,
+    runtime.defaultRotation.y + rotation[1] * DEGREES_TO_RADIANS,
+    runtime.defaultRotation.z + rotation[2] * DEGREES_TO_RADIANS,
+    runtime.defaultRotation.order,
+  );
+  runtime.root.scale.set(
+    runtime.defaultScale.x * scale[0],
+    runtime.defaultScale.y * scale[1],
+    runtime.defaultScale.z * scale[2],
+  );
+}
+
+function applyCustomTransform(
+  root: THREE.Object3D,
+  asset: CustomSceneAsset,
+) {
+  root.position.set(...asset.transform.position);
+  root.rotation.set(
+    asset.transform.rotation[0] * DEGREES_TO_RADIANS,
+    asset.transform.rotation[1] * DEGREES_TO_RADIANS,
+    asset.transform.rotation[2] * DEGREES_TO_RADIANS,
+  );
+  root.scale.set(...asset.transform.scale);
+}
+
+function disposeObjectResources(root: THREE.Object3D) {
+  const disposedTextures = new Set<THREE.Texture>();
+  const disposedMaterials = new Set<THREE.Material>();
+  const disposedGeometries = new Set<THREE.BufferGeometry>();
+  const disposedSkeletons = new Set<THREE.Skeleton>();
+  const disposedImageBitmaps = new Set<ImageBitmap>();
+
+  root.traverse((object) => {
+    if (
+      object instanceof THREE.SkinnedMesh &&
+      !disposedSkeletons.has(object.skeleton)
+    ) {
+      disposedSkeletons.add(object.skeleton);
+      object.skeleton.dispose();
+    }
+    const mesh = object as THREE.Mesh;
+    if (mesh.geometry && !disposedGeometries.has(mesh.geometry)) {
+      disposedGeometries.add(mesh.geometry);
+      mesh.geometry.dispose();
+    }
+
+    const materials = Array.isArray(mesh.material)
+      ? mesh.material
+      : mesh.material
+        ? [mesh.material]
+        : [];
+    for (const material of materials) {
+      if (disposedMaterials.has(material)) continue;
+      disposedMaterials.add(material);
+      for (const value of Object.values(material)) {
+        if (
+          value instanceof THREE.Texture &&
+          !disposedTextures.has(value)
+        ) {
+          disposedTextures.add(value);
+          const sourceData = value.source.data;
+          if (
+            typeof ImageBitmap !== "undefined" &&
+            sourceData instanceof ImageBitmap &&
+            !disposedImageBitmaps.has(sourceData)
+          ) {
+            disposedImageBitmaps.add(sourceData);
+            sourceData.close();
+          }
+          value.dispose();
+        }
+      }
+      material.dispose();
+    }
+  });
 }
 
 function createRoomShell(scene: THREE.Scene) {
@@ -1192,7 +1330,9 @@ function SiteCredit({ locale }: { locale: Locale }) {
 
 function RoomScene({
   activeId,
+  assets,
   resetSignal,
+  sceneConfig,
   sceneLabel,
   timeZone,
   onSelect,
@@ -1295,9 +1435,39 @@ function RoomScene({
     const hitboxes: THREE.Mesh[] = [];
     const animated: AnimateCallback[] = [];
     const assetLighting = createSceneAssets(scene, hitboxes, animated);
+    scene.updateMatrixWorld(true);
+    const coreRuntimes = new Map<CoreAssetId, CoreSceneRuntime>();
+    for (const hitbox of hitboxes) {
+      const id = hitbox.userData.assetId;
+      if (!isAssetId(id) || coreRuntimes.has(id) || !hitbox.parent) continue;
+      const defaultWorldMatrix = hitbox.parent.matrixWorld.clone();
+      coreRuntimes.set(id, {
+        id,
+        root: hitbox.parent,
+        defaultPosition: hitbox.parent.position.clone(),
+        defaultRotation: hitbox.parent.rotation.clone(),
+        defaultScale: hitbox.parent.scale.clone(),
+        defaultWorldMatrixInverse: defaultWorldMatrix.clone().invert(),
+        markerLocalPosition: new THREE.Vector3(...MARKER_POSITIONS[id])
+          .applyMatrix4(defaultWorldMatrix.clone().invert()),
+      });
+    }
+    const customRuntimes = new Map<
+      CustomSceneAsset["id"],
+      CustomSceneRuntime
+    >();
+    const gltfLoader = new GLTFLoader();
+    let runtimeAssetById = new Map<AssetId, PortfolioAsset>();
+    let sceneDisposed = false;
     const deskLight = new THREE.PointLight("#f0a95f", 0, 5.5, 2);
-    deskLight.position.set(-0.77, 1.78, -3.93);
-    scene.add(deskLight);
+    const researchRoot = coreRuntimes.get("research")?.root;
+    if (researchRoot) {
+      deskLight.position.set(-1.22, 1.78, -0.28);
+      researchRoot.add(deskLight);
+    } else {
+      deskLight.position.set(-0.77, 1.78, -3.93);
+      scene.add(deskLight);
+    }
 
     const markerMaterial = new THREE.MeshBasicMaterial({
       color: "#e2a85f",
@@ -1345,6 +1515,7 @@ function RoomScene({
     const nightWindowColor = new THREE.Color("#41617d");
     const dayWindowColor = new THREE.Color("#a8d3d1");
     const workingColor = new THREE.Color();
+    const markerBounds = new THREE.Box3();
 
     const applyLighting = () => {
       const lighting = getSolarLightingState(
@@ -1452,7 +1623,9 @@ function RoomScene({
       raycaster.setFromCamera(pointer, camera);
       const intersection = raycaster.intersectObjects(hitboxes, false)[0];
       const id = intersection?.object.userData.assetId;
-      return isAssetId(id) ? id : null;
+      return typeof id === "string" && runtimeAssetById.has(id)
+        ? id
+        : null;
     };
 
     const showMarker = (id: AssetId | null) => {
@@ -1461,8 +1634,36 @@ function RoomScene({
         marker.visible = false;
         return;
       }
-      marker.position.set(...MARKER_POSITIONS[id]);
-      markerMaterial.color.set(ASSET_BY_ID[id].accent);
+
+      const asset = runtimeAssetById.get(id);
+      if (!asset) {
+        marker.visible = false;
+        return;
+      }
+
+      const customRuntime = customRuntimes.get(
+        id as CustomSceneAsset["id"],
+      );
+      if (customRuntime) {
+        markerBounds
+          .setFromObject(customRuntime.model ?? customRuntime.placeholder)
+          .getCenter(marker.position);
+        marker.position.y = markerBounds.min.y + 0.04;
+      } else if (isAssetId(id)) {
+        const coreRuntime = coreRuntimes.get(id);
+        if (coreRuntime) {
+          marker.position
+            .copy(coreRuntime.markerLocalPosition)
+            .applyMatrix4(coreRuntime.root.matrixWorld);
+        } else {
+          marker.position.set(...MARKER_POSITIONS[id]);
+        }
+      } else {
+        marker.visible = false;
+        return;
+      }
+
+      markerMaterial.color.set(asset.accent);
       marker.visible = true;
     };
 
@@ -1472,6 +1673,314 @@ function RoomScene({
       renderer.domElement.style.cursor = id ? "pointer" : "grab";
       if (!activeMarkerId || !id) showMarker(id ?? activeMarkerId);
       onHoverRef.current(id);
+    };
+
+    const updateCustomInteractionBounds = (
+      runtime: CustomSceneRuntime,
+    ) => {
+      const center = runtime.localBounds.getCenter(new THREE.Vector3());
+      const size = runtime.localBounds.getSize(new THREE.Vector3());
+      size.set(
+        Math.max(size.x, 0.15),
+        Math.max(size.y, 0.15),
+        Math.max(size.z, 0.15),
+      );
+
+      if (runtime.hitbox) {
+        runtime.hitbox.position.copy(center);
+        runtime.hitbox.scale.copy(size);
+      }
+      if (runtime.signal) {
+        runtime.signal.position.set(
+          center.x,
+          runtime.localBounds.max.y + 0.16,
+          center.z,
+        );
+      }
+    };
+
+    const removeCustomInteraction = (runtime: CustomSceneRuntime) => {
+      if (runtime.hitbox) {
+        const index = hitboxes.indexOf(runtime.hitbox);
+        if (index >= 0) hitboxes.splice(index, 1);
+        runtime.hitbox.removeFromParent();
+        disposeObjectResources(runtime.hitbox);
+        runtime.hitbox = undefined;
+      }
+      if (runtime.signal) {
+        runtime.signal.removeFromParent();
+        disposeObjectResources(runtime.signal);
+        runtime.signal = undefined;
+      }
+    };
+
+    const syncCustomInteraction = (
+      runtime: CustomSceneRuntime,
+      asset: CustomSceneAsset,
+    ) => {
+      if (asset.behavior !== "interactive") {
+        removeCustomInteraction(runtime);
+        return;
+      }
+
+      if (!runtime.hitbox) {
+        const hitbox = new THREE.Mesh(
+          new THREE.BoxGeometry(1, 1, 1),
+          new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0,
+            colorWrite: false,
+            depthWrite: false,
+          }),
+        );
+        hitbox.userData.assetId = asset.id;
+        runtime.root.add(hitbox);
+        hitboxes.push(hitbox);
+        runtime.hitbox = hitbox;
+      }
+
+      if (!runtime.signal) {
+        const signal = new THREE.Mesh(
+          new THREE.SphereGeometry(0.065, 12, 10),
+          new THREE.MeshBasicMaterial({
+            color: asset.accent,
+            transparent: true,
+            opacity: 0.85,
+          }),
+        );
+        runtime.root.add(signal);
+        runtime.signal = signal;
+      }
+      runtime.signal.material.color.set(asset.accent);
+      updateCustomInteractionBounds(runtime);
+    };
+
+    const loadCustomModel = (
+      runtime: CustomSceneRuntime,
+      modelSrc: string | undefined,
+    ) => {
+      runtime.loadController?.abort();
+      runtime.loadController = undefined;
+      runtime.loadVersion += 1;
+      const loadVersion = runtime.loadVersion;
+      runtime.modelSrc = modelSrc;
+
+      if (runtime.model) {
+        runtime.model.removeFromParent();
+        disposeObjectResources(runtime.model);
+        runtime.model = undefined;
+      }
+      runtime.placeholder.visible = true;
+      runtime.localBounds.copy(FALLBACK_MODEL_BOUNDS);
+      updateCustomInteractionBounds(runtime);
+
+      if (!modelSrc) return;
+
+      const controller = new AbortController();
+      runtime.loadController = controller;
+      const isCurrentLoad = () =>
+        !sceneDisposed &&
+        !controller.signal.aborted &&
+        runtime.loadVersion === loadVersion &&
+        customRuntimes.get(runtime.id) === runtime;
+
+      void (async () => {
+        try {
+          const response = await fetch(modelSrc, {
+            credentials: "same-origin",
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error("Model request failed");
+
+          const contentLength = response.headers.get("content-length");
+          if (
+            contentLength &&
+            Number.isFinite(Number(contentLength)) &&
+            Number(contentLength) > MAX_RUNTIME_MODEL_BYTES
+          ) {
+            throw new Error("Model exceeds the runtime size limit");
+          }
+
+          const buffer = await response.arrayBuffer();
+          if (buffer.byteLength > MAX_RUNTIME_MODEL_BYTES) {
+            throw new Error("Model exceeds the runtime size limit");
+          }
+          if (!isCurrentLoad()) return;
+
+          const modelBaseUrl = new URL(
+            ".",
+            new URL(modelSrc, window.location.href),
+          ).href;
+          const gltf = await gltfLoader.parseAsync(buffer, modelBaseUrl);
+          const model = gltf.scene;
+          if (!isCurrentLoad()) {
+            disposeObjectResources(model);
+            return;
+          }
+
+          model.updateMatrixWorld(true);
+          const bounds = new THREE.Box3().setFromObject(model, true);
+          if (bounds.isEmpty()) {
+            disposeObjectResources(model);
+            return;
+          }
+
+          model.traverse((object) => {
+            if (!(object instanceof THREE.Mesh)) return;
+            object.castShadow = true;
+            object.receiveShadow = true;
+          });
+          runtime.model = model;
+          runtime.localBounds.copy(bounds);
+          runtime.root.add(model);
+          runtime.placeholder.visible = false;
+          updateCustomInteractionBounds(runtime);
+          scene.updateMatrixWorld(true);
+          if (activeMarkerId === runtime.id) showMarker(runtime.id);
+        } catch {
+          if (!isCurrentLoad()) return;
+          runtime.placeholder.visible = true;
+          runtime.localBounds.copy(FALLBACK_MODEL_BOUNDS);
+          updateCustomInteractionBounds(runtime);
+          scene.updateMatrixWorld(true);
+          if (activeMarkerId === runtime.id) showMarker(runtime.id);
+        } finally {
+          if (runtime.loadController === controller) {
+            runtime.loadController = undefined;
+          }
+        }
+      })();
+    };
+
+    const createCustomRuntime = (
+      asset: CustomSceneAsset,
+    ): CustomSceneRuntime => {
+      const root = new THREE.Group();
+      root.name = `custom-scene-asset:${asset.id}`;
+      const placeholder = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({
+          color: asset.accent,
+          roughness: 0.68,
+          metalness: 0.08,
+          transparent: true,
+          opacity: 0.72,
+          wireframe: true,
+        }),
+      );
+      placeholder.position.y = 0.5;
+      placeholder.castShadow = true;
+      placeholder.receiveShadow = true;
+      root.add(placeholder);
+      scene.add(root);
+
+      const runtime: CustomSceneRuntime = {
+        id: asset.id,
+        root,
+        placeholder,
+        localBounds: FALLBACK_MODEL_BOUNDS.clone(),
+        loadVersion: 0,
+      };
+      customRuntimes.set(asset.id, runtime);
+      return runtime;
+    };
+
+    const removeCustomRuntime = (runtime: CustomSceneRuntime) => {
+      runtime.loadController?.abort();
+      runtime.loadController = undefined;
+      runtime.loadVersion += 1;
+      const hitboxIndex = runtime.hitbox
+        ? hitboxes.indexOf(runtime.hitbox)
+        : -1;
+      if (hitboxIndex >= 0) hitboxes.splice(hitboxIndex, 1);
+      runtime.root.removeFromParent();
+      disposeObjectResources(runtime.root);
+      customRuntimes.delete(runtime.id);
+    };
+
+    let focusedId: AssetId | null = null;
+    const focusAsset = (id: AssetId | null) => {
+      focusedId = id;
+      if (!id) {
+        controls.enabled = true;
+        activeMarkerId = null;
+        if (!hoveredId) marker.visible = false;
+        return;
+      }
+
+      const asset = runtimeAssetById.get(id);
+      if (!asset) {
+        focusedId = null;
+        controls.enabled = true;
+        showMarker(null);
+        return;
+      }
+
+      goalCamera = new THREE.Vector3(...asset.focus.camera);
+      goalTarget = new THREE.Vector3(...asset.focus.target);
+      if (isAssetId(id)) {
+        const coreRuntime = coreRuntimes.get(id);
+        if (coreRuntime) {
+          goalCamera
+            .applyMatrix4(coreRuntime.defaultWorldMatrixInverse)
+            .applyMatrix4(coreRuntime.root.matrixWorld);
+          goalTarget
+            .applyMatrix4(coreRuntime.defaultWorldMatrixInverse)
+            .applyMatrix4(coreRuntime.root.matrixWorld);
+        }
+      }
+      showMarker(id);
+      controls.enabled = false;
+      if (reducedMotion.matches) {
+        camera.position.copy(goalCamera);
+        controls.target.copy(goalTarget);
+        controls.update();
+        tweening = false;
+      } else {
+        tweening = true;
+      }
+    };
+
+    const syncScene = (
+      nextSceneConfig: SceneConfig,
+      nextAssets: PortfolioAsset[],
+    ) => {
+      runtimeAssetById = new Map(
+        nextAssets.map((asset) => [asset.id, asset]),
+      );
+
+      for (const [id, runtime] of coreRuntimes) {
+        applyCorePlacement(runtime, nextSceneConfig.placements?.[id]);
+      }
+
+      const nextCustomIds = new Set<CustomSceneAsset["id"]>();
+      for (const asset of nextSceneConfig.customAssets ?? []) {
+        nextCustomIds.add(asset.id);
+        const runtime =
+          customRuntimes.get(asset.id) ?? createCustomRuntime(asset);
+        applyCustomTransform(runtime.root, asset);
+        runtime.placeholder.material.color.set(asset.accent);
+        syncCustomInteraction(runtime, asset);
+        if (runtime.modelSrc !== asset.modelSrc) {
+          loadCustomModel(runtime, asset.modelSrc);
+        }
+      }
+
+      for (const runtime of [...customRuntimes.values()]) {
+        if (!nextCustomIds.has(runtime.id)) removeCustomRuntime(runtime);
+      }
+
+      scene.updateMatrixWorld(true);
+      if (hoveredId && !runtimeAssetById.has(hoveredId)) {
+        setHovered(null);
+      }
+      if (activeMarkerId && !runtimeAssetById.has(activeMarkerId)) {
+        showMarker(null);
+      } else if (activeMarkerId) {
+        showMarker(activeMarkerId);
+      }
+      if (focusedId) focusAsset(focusedId);
     };
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -1594,28 +2103,9 @@ function RoomScene({
     resize();
 
     handleRef.current = {
-      focus(id) {
-        if (!id) {
-          controls.enabled = true;
-          activeMarkerId = null;
-          if (!hoveredId) marker.visible = false;
-          return;
-        }
-        const asset = ASSET_BY_ID[id];
-        goalCamera = new THREE.Vector3(...asset.focus.camera);
-        goalTarget = new THREE.Vector3(...asset.focus.target);
-        showMarker(id);
-        controls.enabled = false;
-        if (reducedMotion.matches) {
-          camera.position.copy(goalCamera);
-          controls.target.copy(goalTarget);
-          controls.update();
-          tweening = false;
-        } else {
-          tweening = true;
-        }
-      },
+      focus: focusAsset,
       reset() {
+        focusedId = null;
         goalCamera = DEFAULT_CAMERA.clone();
         goalTarget = DEFAULT_TARGET.clone();
         activeMarkerId = null;
@@ -1630,6 +2120,7 @@ function RoomScene({
           tweening = true;
         }
       },
+      sync: syncScene,
     };
 
     renderer.setAnimationLoop((now) => {
@@ -1672,6 +2163,10 @@ function RoomScene({
     onReadyRef.current();
 
     return () => {
+      sceneDisposed = true;
+      for (const runtime of [...customRuntimes.values()]) {
+        removeCustomRuntime(runtime);
+      }
       handleRef.current = null;
       lightingUpdateRef.current = null;
       window.clearInterval(lightingTimer);
@@ -1720,6 +2215,10 @@ function RoomScene({
       renderer.domElement.remove();
     };
   }, []);
+
+  useEffect(() => {
+    handleRef.current?.sync(sceneConfig, assets);
+  }, [assets, sceneConfig]);
 
   useEffect(() => {
     handleRef.current?.focus(activeId);
@@ -2020,7 +2519,9 @@ function DetailPanel({
               <i className="status-dot" aria-hidden="true" />
               {asset.status}
             </span>
-            <span>{copy.updated} / {asset.lastUpdated}</span>
+            {asset.lastUpdated && (
+              <span>{copy.updated} / {asset.lastUpdated}</span>
+            )}
           </div>
 
           {asset.id === "about" ? (
@@ -2036,14 +2537,16 @@ function DetailPanel({
             <p className="detail-intro">{asset.intro}</p>
           )}
 
-          <div className="metric-grid">
-            {asset.metrics.map((metric) => (
-              <div className="metric" key={metric.label}>
-                <strong>{metric.value}</strong>
-                <span>{metric.label}</span>
-              </div>
-            ))}
-          </div>
+          {asset.metrics.length > 0 && (
+            <div className="metric-grid">
+              {asset.metrics.map((metric) => (
+                <div className="metric" key={metric.label}>
+                  <strong>{metric.value}</strong>
+                  <span>{metric.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {asset.id === "photography" ? (
             <PhotographyGallery
@@ -2051,11 +2554,11 @@ function DetailPanel({
               locale={locale}
               media={media.photography}
             />
-          ) : (
+          ) : !asset.id.startsWith("custom-") ? (
             <SpecialtyModule asset={asset} locale={locale} />
-          )}
+          ) : null}
 
-          {asset.id !== "photography" && (
+          {asset.id !== "photography" && asset.entries.length > 0 && (
             <div className="entry-grid">
               {asset.entries.map((entry, index) => (
                 <article className="entry-card" key={entry.id ?? entry.title}>
@@ -2071,23 +2574,29 @@ function DetailPanel({
             </div>
           )}
 
-          <blockquote>{asset.note}</blockquote>
+          {asset.note && <blockquote>{asset.note}</blockquote>}
 
-          <footer className="detail-footer">
-            <div>
-              <p className="eyebrow">{copy.continueExploring}</p>
-              <h3>{copy.nextObject}</h3>
-            </div>
-            <div className="related-links">
-              {asset.related.slice(0, 2).map((id) => (
-                <button type="button" key={id} onClick={() => onOpenRelated(id)}>
-                  <span>{assetById[id].objectLabel}</span>
-                  <small>{assetById[id].teaser}</small>
-                  <i aria-hidden="true">↗</i>
-                </button>
-              ))}
-            </div>
-          </footer>
+          {asset.related.length > 0 && (
+            <footer className="detail-footer">
+              <div>
+                <p className="eyebrow">{copy.continueExploring}</p>
+                <h3>{copy.nextObject}</h3>
+              </div>
+              <div className="related-links">
+                {asset.related.slice(0, 2).map((id) => (
+                  <button
+                    type="button"
+                    key={id}
+                    onClick={() => onOpenRelated(id)}
+                  >
+                    <span>{assetById[id].objectLabel}</span>
+                    <small>{assetById[id].teaser}</small>
+                    <i aria-hidden="true">↗</i>
+                  </button>
+                ))}
+              </div>
+            </footer>
+          )}
         </div>
       </article>
     </section>
@@ -2145,7 +2654,11 @@ function AssetIndex({
         <header>
           <div>
             <p className="eyebrow">{copy.indexEyebrow}</p>
-            <h2 id="asset-index-title">{copy.indexTitle}</h2>
+            <h2 id="asset-index-title">
+              {locale === "zh"
+                ? `房间里的 ${assets.length} 个入口`
+                : `${assets.length} ways into the room`}
+            </h2>
           </div>
           <div className="dialog-header-actions">
             <button
@@ -2303,9 +2816,26 @@ export default function RoomExperience() {
     () => mergeProfile(locale, contentConfig),
     [contentConfig, locale],
   );
-  const assets = useMemo(
+  const coreAssets = useMemo(
     () => mergeAssets(baseAssets, locale, contentConfig),
     [baseAssets, contentConfig, locale],
+  );
+  const customAssets = useMemo(
+    () =>
+      mergeCustomSceneAssets(
+        locale,
+        contentConfig,
+        coreAssets.length + 1,
+      ),
+    [contentConfig, coreAssets.length, locale],
+  );
+  const assets = useMemo(
+    () => [...coreAssets, ...customAssets],
+    [coreAssets, customAssets],
+  );
+  const sceneConfig = useMemo(
+    () => mergeSceneConfig(contentConfig),
+    [contentConfig],
   );
   const media = useMemo(
     () => mergeMedia(contentConfig),
@@ -2316,10 +2846,11 @@ export default function RoomExperience() {
     [contentConfig],
   );
   const assetById = useMemo(
-    () =>
-      Object.fromEntries(
-        assets.map((asset) => [asset.id, asset]),
-      ) as Record<AssetId, PortfolioAsset>,
+    () => {
+      const lookup = Object.create(null) as Record<AssetId, PortfolioAsset>;
+      for (const asset of assets) lookup[asset.id] = asset;
+      return lookup;
+    },
     [assets],
   );
   const categoryOrder =
@@ -2327,20 +2858,28 @@ export default function RoomExperience() {
 
   const readRoute = useCallback(() => {
     const section = new URL(window.location.href).searchParams.get("section");
-    return isAssetId(section) ? section : null;
-  }, []);
+    return section && Object.hasOwn(assetById, section) ? section : null;
+  }, [assetById]);
 
   const readLocale = useCallback((): Locale => {
     const urlLocale = new URL(window.location.href).searchParams.get("lang");
     if (urlLocale === "en" || urlLocale === "zh") return urlLocale;
-    return window.localStorage.getItem("living-index-locale") === "en"
-      ? "en"
-      : "zh";
+    try {
+      return window.localStorage.getItem("living-index-locale") === "en"
+        ? "en"
+        : "zh";
+    } catch {
+      return "zh";
+    }
   }, []);
 
   const changeLocale = useCallback((nextLocale: Locale) => {
     setLocale(nextLocale);
-    window.localStorage.setItem("living-index-locale", nextLocale);
+    try {
+      window.localStorage.setItem("living-index-locale", nextLocale);
+    } catch {
+      // The language still changes for this session when storage is blocked.
+    }
     const url = new URL(window.location.href);
     if (nextLocale === "en") url.searchParams.set("lang", "en");
     else url.searchParams.delete("lang");
@@ -2375,7 +2914,11 @@ export default function RoomExperience() {
         );
         if (localDraft) next = parseSiteContent(localDraft);
       } catch {
-        window.localStorage.removeItem("living-index.content-draft.v1");
+        try {
+          window.localStorage.removeItem("living-index.content-draft.v1");
+        } catch {
+          // Storage may be unavailable in private or hardened browser modes.
+        }
       }
 
       if (!cancelled) {
@@ -2393,10 +2936,14 @@ export default function RoomExperience() {
 
   useEffect(() => {
     if (!contentLoaded) return;
-    window.localStorage.setItem(
-      "living-index.content-draft.v1",
-      JSON.stringify(contentConfig),
-    );
+    try {
+      window.localStorage.setItem(
+        "living-index.content-draft.v1",
+        JSON.stringify(contentConfig),
+      );
+    } catch {
+      // Keep the in-memory draft usable when the browser quota is exhausted.
+    }
   }, [contentConfig, contentLoaded]);
 
   const updateRoute = useCallback((id: AssetId | null, mode: "push" | "replace") => {
@@ -2431,6 +2978,7 @@ export default function RoomExperience() {
 
   const openAsset = useCallback(
     (id: AssetId, source?: HTMLElement | null) => {
+      if (studioOpen) return;
       previousFocusRef.current =
         source ?? (document.activeElement as HTMLElement | null);
       openedFromRoomRef.current = readRoute() !== id;
@@ -2440,7 +2988,7 @@ export default function RoomExperience() {
       setHelpOpen(false);
       setActiveId(id);
     },
-    [readRoute, updateRoute],
+    [readRoute, studioOpen, updateRoute],
   );
 
   const closeAsset = useCallback(() => {
@@ -2468,6 +3016,22 @@ export default function RoomExperience() {
       window.removeEventListener("popstate", handlePopState);
     };
   }, [readLocale, readRoute]);
+
+  useEffect(() => {
+    if (
+      !contentLoaded ||
+      !activeId ||
+      assetById[activeId]
+    ) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      openedFromRoomRef.current = false;
+      setActiveId(null);
+      updateRoute(null, "replace");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeId, assetById, contentLoaded, updateRoute]);
 
   useEffect(() => {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
@@ -2507,11 +3071,24 @@ export default function RoomExperience() {
   }, [activeId, closeAsset, helpOpen, indexOpen, studioOpen]);
 
   const handleSceneKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Enter" && hoveredId) openAsset(hoveredId);
+    if (
+      event.key === "Enter" &&
+      event.target instanceof HTMLCanvasElement &&
+      hoveredId &&
+      !studioOpen
+    ) {
+      openAsset(hoveredId);
+    }
   };
 
-  const hoveredAsset = hoveredId ? assetById[hoveredId] : null;
-  const activeAsset = activeId ? assetById[activeId] : null;
+  const hoveredAsset =
+    hoveredId && Object.hasOwn(assetById, hoveredId)
+      ? assetById[hoveredId]
+      : null;
+  const activeAsset =
+    activeId && Object.hasOwn(assetById, activeId)
+      ? assetById[activeId]
+      : null;
 
   return (
     <main
@@ -2532,10 +3109,14 @@ export default function RoomExperience() {
 
       <RoomScene
         activeId={activeId}
+        assets={assets}
         resetSignal={resetSignal}
+        sceneConfig={sceneConfig}
         sceneLabel={copy.sceneLabel}
         timeZone={profile.timezone}
-        onSelect={(id) => openAsset(id)}
+        onSelect={(id) => {
+          if (!studioOpen) openAsset(id);
+        }}
         onHover={setHoveredId}
         onReady={() => setReady(true)}
         onError={() => setWebglFailed(true)}
@@ -2629,7 +3210,9 @@ export default function RoomExperience() {
                 }}
               >
                 <span>{webglFailed ? copy.enterLite : copy.openIndex}</span>
-                <i aria-hidden="true">12 ENTRIES</i>
+                <i aria-hidden="true">
+                  {String(assets.length).padStart(2, "0")} ENTRIES
+                </i>
               </button>
             </div>
           </div>
@@ -2685,7 +3268,7 @@ export default function RoomExperience() {
                 }}
               >
                 <span>{copy.index}</span>
-                <small>12</small>
+                <small>{String(assets.length).padStart(2, "0")}</small>
               </button>
               <button
                 type="button"
@@ -2813,7 +3396,11 @@ export default function RoomExperience() {
         onLocaleChange={changeLocale}
         onClose={() => setStudioOpen(false)}
         onReset={() => {
-          window.localStorage.removeItem("living-index.content-draft.v1");
+          try {
+            window.localStorage.removeItem("living-index.content-draft.v1");
+          } catch {
+            // Reset still restores published content when storage is blocked.
+          }
           setContentConfig(publishedContent);
         }}
         onProjectSaved={(savedConfig) => {

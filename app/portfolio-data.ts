@@ -1,4 +1,4 @@
-export type AssetId =
+export type CoreAssetId =
   | "music"
   | "fitness"
   | "reading"
@@ -11,6 +11,8 @@ export type AssetId =
   | "travel"
   | "contact"
   | "future";
+
+export type AssetId = string;
 
 export type AssetCategory =
   | "兴趣"
@@ -631,7 +633,7 @@ export const PORTFOLIO_ASSETS: PortfolioAsset[] = [
 
 export const ASSET_BY_ID = Object.fromEntries(
   PORTFOLIO_ASSETS.map((asset) => [asset.id, asset]),
-) as Record<AssetId, PortfolioAsset>;
+) as Record<CoreAssetId, PortfolioAsset>;
 
 export const CATEGORY_ORDER: AssetCategory[] = [
   "生活",
@@ -642,6 +644,6 @@ export const CATEGORY_ORDER: AssetCategory[] = [
   "成长",
 ];
 
-export function isAssetId(value: string | null): value is AssetId {
-  return Boolean(value && value in ASSET_BY_ID);
+export function isAssetId(value: string | null): value is CoreAssetId {
+  return Boolean(value && Object.hasOwn(ASSET_BY_ID, value));
 }

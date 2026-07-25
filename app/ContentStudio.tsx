@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   CONTENT_LIMITS,
+  MAX_CONTENT_SAVE_BYTES,
   isValidSocialUrl,
   mergeAssets,
   mergeSocialLinks,
@@ -24,10 +25,12 @@ import {
   type SocialPlatform,
 } from "./content-config";
 import { ImageUploadField } from "./ImageUploadField";
+import { SceneStudio } from "./SceneStudio";
 import { SocialIcon } from "./SocialIcon";
 import {
   PORTFOLIO_ASSETS,
-  type AssetId,
+  isAssetId,
+  type CoreAssetId,
   type PortfolioAsset,
 } from "./portfolio-data";
 import { PORTFOLIO_ASSETS_EN } from "./portfolio-data-en";
@@ -45,7 +48,7 @@ export interface ContentStudioProps {
   onProjectSaved?: (config: SiteContentConfig) => void;
 }
 
-type StudioSection = "profile" | "assets";
+type StudioSection = "profile" | "assets" | "scene";
 type ProfileKey = keyof ProfileContent;
 type AssetTextKey =
   | "objectLabel"
@@ -81,6 +84,14 @@ function createStudioId(prefix: string): string {
 }
 
 const STUDIO_LOCALES = ["zh", "en"] as const satisfies readonly ContentLocale[];
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 function withStablePhotographyIds(
   entries: readonly PortfolioEntry[],
@@ -113,6 +124,9 @@ const TEXT = {
     description: "修改后会立即显示在房间中；草稿自动保存在这台设备。",
     profile: "个人主页",
     assets: "数字资产",
+    scene: "场景布局",
+    previewScene: "场景预览",
+    exitPreview: "退出预览",
     currentLanguage: "当前编辑语言",
     import: "导入",
     export: "导出",
@@ -130,6 +144,7 @@ const TEXT = {
     invalid: "文件不是有效的内容配置",
     invalidSocial: "请先为每个社交链接填写有效地址",
     saveFailed: "无法写入项目，请改用导出",
+    saveTooLarge: "内容超过本地保存上限，请删减长文本或内容卡片",
     identity: "身份与首屏",
     identityHelp: "这些字段驱动首屏、房间标志和左下角位置。",
     assetHelp: "选择房间物件，编辑访客进入后看到的章节内容。",
@@ -189,6 +204,9 @@ const TEXT = {
       "Changes appear in the room immediately; drafts are saved on this device.",
     profile: "Profile",
     assets: "Digital assets",
+    scene: "Scene layout",
+    previewScene: "Preview scene",
+    exitPreview: "Exit preview",
     currentLanguage: "Editing language",
     import: "Import",
     export: "Export",
@@ -206,6 +224,8 @@ const TEXT = {
     invalid: "That file is not a valid content configuration",
     invalidSocial: "Add a valid URL for every social link before saving",
     saveFailed: "Could not write to the project; export instead",
+    saveTooLarge:
+      "Content exceeds the local save limit; shorten long text or remove cards",
     identity: "Identity and intro",
     identityHelp:
       "These fields drive the intro, room wordmark, and location label.",
@@ -332,17 +352,34 @@ export function ContentStudio({
 }: ContentStudioProps) {
   const text = TEXT[locale];
   const [section, setSection] = useState<StudioSection>("profile");
-  const [selectedId, setSelectedId] = useState<AssetId>("music");
+  const [selectedId, setSelectedId] = useState<CoreAssetId>("music");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [projectWritable, setProjectWritable] = useState(false);
+  const [projectMaxBytes, setProjectMaxBytes] = useState(
+    MAX_CONTENT_SAVE_BYTES,
+  );
   const [resetArmed, setResetArmed] = useState(false);
+  const [scenePreview, setScenePreview] = useState(false);
+  const backdropRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
+  const coreAssets = useMemo(
+    () =>
+      assets.filter(
+        (asset): asset is PortfolioAsset & { id: CoreAssetId } =>
+          isAssetId(asset.id),
+      ),
+    [assets],
+  );
   const selectedAsset = useMemo(
     () => {
       const asset =
-        assets.find((candidate) => candidate.id === selectedId) ?? assets[0];
+        coreAssets.find((candidate) => candidate.id === selectedId) ??
+        coreAssets[0];
       if (!asset) return undefined;
 
       return {
@@ -350,7 +387,7 @@ export function ContentStudio({
         ...config.assets[locale]?.[asset.id],
       };
     },
-    [assets, config.assets, locale, selectedId],
+    [config.assets, coreAssets, locale, selectedId],
   );
 
   useEffect(() => {
@@ -360,8 +397,20 @@ export function ContentStudio({
       method: "GET",
       cache: "no-store",
     })
-      .then((response) => {
-        if (!cancelled) setProjectWritable(response.ok);
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => null)) as
+          | { maxBodyBytes?: unknown }
+          | null;
+        if (cancelled) return;
+        setProjectWritable(response.ok);
+        if (
+          response.ok &&
+          typeof payload?.maxBodyBytes === "number" &&
+          Number.isSafeInteger(payload.maxBodyBytes) &&
+          payload.maxBodyBytes > 0
+        ) {
+          setProjectMaxBytes(payload.maxBodyBytes);
+        }
       })
       .catch(() => {
         if (!cancelled) setProjectWritable(false);
@@ -376,6 +425,103 @@ export function ContentStudio({
     const timeout = window.setTimeout(() => setResetArmed(false), 2600);
     return () => window.clearTimeout(timeout);
   }, [resetArmed]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const frame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      const returnTarget = returnFocusRef.current;
+      returnFocusRef.current = null;
+      window.requestAnimationFrame(() => {
+        if (returnTarget?.isConnected) returnTarget.focus();
+      });
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open || !scenePreview) return;
+    const frame = window.requestAnimationFrame(() => {
+      setScenePreview(false);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, scenePreview]);
+
+  useEffect(() => {
+    if (!open || scenePreview) return;
+
+    const backdrop = backdropRef.current;
+    const panel = panelRef.current;
+    const parent = backdrop?.parentElement;
+    if (!backdrop || !panel || !parent) return;
+
+    const backgroundStates = Array.from(parent.children)
+      .filter(
+        (element): element is HTMLElement =>
+          element instanceof HTMLElement && element !== backdrop,
+      )
+      .map((element) => ({
+        element,
+        inert: element.hasAttribute("inert"),
+        ariaHidden: element.getAttribute("aria-hidden"),
+      }));
+
+    for (const { element } of backgroundStates) {
+      element.setAttribute("inert", "");
+      element.setAttribute("aria-hidden", "true");
+    }
+
+    const focusPanel = window.requestAnimationFrame(() => {
+      if (!panel.contains(document.activeElement)) {
+        closeButtonRef.current?.focus();
+      }
+    });
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ).filter(
+        (element) =>
+          !element.hasAttribute("disabled") &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          element.getClientRects().length > 0,
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", trapFocus);
+
+    return () => {
+      window.cancelAnimationFrame(focusPanel);
+      document.removeEventListener("keydown", trapFocus);
+      for (const { element, inert, ariaHidden } of backgroundStates) {
+        if (!inert) element.removeAttribute("inert");
+        if (ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      }
+    };
+  }, [open, scenePreview]);
 
   if (!open) return null;
 
@@ -400,9 +546,9 @@ export function ContentStudio({
   };
 
   const updateAsset = (
-    id: AssetId,
+    id: CoreAssetId,
     patch: NonNullable<
-      NonNullable<SiteContentConfig["assets"][ContentLocale]>[AssetId]
+      NonNullable<SiteContentConfig["assets"][ContentLocale]>[CoreAssetId]
     >,
   ) => {
     onChange((current) => ({
@@ -652,12 +798,26 @@ export function ContentStudio({
     setStatus("");
     try {
       const normalized = parseSiteContent(config);
+      const body = JSON.stringify(normalized);
+      if (new TextEncoder().encode(body).byteLength > projectMaxBytes) {
+        setStatus(text.saveTooLarge);
+        return;
+      }
       const response = await fetch("/__content-studio/save", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(normalized),
+        body,
       });
-      if (!response.ok) throw new Error("save failed");
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: { code?: unknown } }
+          | null;
+        if (payload?.error?.code === "PAYLOAD_TOO_LARGE") {
+          setStatus(text.saveTooLarge);
+          return;
+        }
+        throw new Error("save failed");
+      }
       onChange((current) => (current === config ? normalized : current));
       onProjectSaved?.(normalized);
       setStatus(text.saved);
@@ -680,12 +840,15 @@ export function ContentStudio({
 
   return (
     <section
-      className="studio-backdrop"
+      ref={backdropRef}
+      className={`studio-backdrop ${
+        scenePreview ? "is-scene-preview" : ""
+      }`}
       role="dialog"
-      aria-modal="true"
+      aria-modal={scenePreview ? undefined : true}
       aria-labelledby="content-studio-title"
     >
-      <article className="studio-panel">
+      <article className="studio-panel" ref={panelRef} tabIndex={-1}>
         <header className="studio-header">
           <div className="studio-brand">
             <p>{text.eyebrow}</p>
@@ -715,11 +878,11 @@ export function ContentStudio({
               </button>
             </div>
             <button
+              ref={closeButtonRef}
               type="button"
               className="studio-close-button"
               onClick={onClose}
               aria-label={text.close}
-              autoFocus
             >
               <span aria-hidden="true">×</span>
               <small>ESC</small>
@@ -743,10 +906,23 @@ export function ContentStudio({
               type="file"
               accept="application/json,.json"
               className="studio-visually-hidden"
+              tabIndex={-1}
               onChange={(event) => void importJson(event)}
             />
           </div>
           <div className="studio-toolbar-group">
+            {section === "scene" && (
+              <button
+                type="button"
+                className={`studio-scene-preview-toggle ${
+                  scenePreview ? "is-active" : ""
+                }`}
+                onClick={() => setScenePreview((current) => !current)}
+                aria-pressed={scenePreview}
+              >
+                {scenePreview ? text.exitPreview : text.previewScene}
+              </button>
+            )}
             {status && (
               <span className="studio-status" role="status">
                 {status}
@@ -782,7 +958,10 @@ export function ContentStudio({
               <button
                 type="button"
                 className={section === "profile" ? "is-active" : ""}
-                onClick={() => setSection("profile")}
+                onClick={() => {
+                  setSection("profile");
+                  setScenePreview(false);
+                }}
               >
                 <span>01</span>
                 <strong>{text.profile}</strong>
@@ -790,15 +969,26 @@ export function ContentStudio({
               <button
                 type="button"
                 className={section === "assets" ? "is-active" : ""}
-                onClick={() => setSection("assets")}
+                onClick={() => {
+                  setSection("assets");
+                  setScenePreview(false);
+                }}
               >
                 <span>02</span>
                 <strong>{text.assets}</strong>
               </button>
+              <button
+                type="button"
+                className={section === "scene" ? "is-active" : ""}
+                onClick={() => setSection("scene")}
+              >
+                <span>03</span>
+                <strong>{text.scene}</strong>
+              </button>
             </nav>
             {section === "assets" && (
               <div className="studio-asset-list">
-                {assets.map((asset) => (
+                {coreAssets.map((asset) => (
                   <button
                     type="button"
                     key={asset.id}
@@ -1325,6 +1515,16 @@ export function ContentStudio({
                   </Section>
                 )}
               </div>
+            )}
+
+            {section === "scene" && (
+              <SceneStudio
+                locale={locale}
+                config={config}
+                assets={coreAssets}
+                projectWritable={projectWritable}
+                onChange={onChange}
+              />
             )}
           </div>
         </div>

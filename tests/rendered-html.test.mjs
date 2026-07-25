@@ -58,6 +58,8 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
     aboutProfile,
     photographyGallery,
     imageUpload,
+    modelUpload,
+    sceneStudio,
   ] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -70,6 +72,8 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
     readFile(new URL("../app/AboutProfileModule.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/PhotographyGallery.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ImageUploadField.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ModelUploadField.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/SceneStudio.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<RoomExperience \/>/);
@@ -84,6 +88,16 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(room, /new URL\(window\.location\.href\)\.searchParams\.get\("lang"\)/);
   assert.match(room, /<ContentStudio/);
   assert.match(room, /params\.get\("studio"\)/);
+  assert.match(room, /GLTFLoader/);
+  assert.match(room, /applyCorePlacement/);
+  assert.match(room, /asset\.behavior !== "interactive"/);
+  assert.match(room, /handleRef\.current\?\.sync\(sceneConfig, assets\)/);
+  assert.match(room, /runtimeAssetById/);
+  assert.match(room, /mergeCustomSceneAssets/);
+  assert.match(room, /mergeSceneConfig/);
+  assert.match(room, /Object\.hasOwn\(assetById, section\)/);
+  assert.match(room, /new AbortController\(\)/);
+  assert.match(room, /sourceData instanceof ImageBitmap/);
   assert.match(data, /id: "music"/);
   assert.match(data, /id: "fitness"/);
   assert.match(data, /id: "reading"/);
@@ -104,8 +118,21 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(studio, /STUDIO_LOCALES/);
   assert.match(studio, /onChange\(\(current\)/);
   assert.match(studio, /photography-spotlight/);
+  assert.match(studio, /<SceneStudio/);
+  assert.match(studio, /is-scene-preview/);
+  assert.match(studio, /setAttribute\("inert", ""\)/);
+  assert.match(studio, /new TextEncoder\(\)/);
   assert.match(imageUpload, /\/__content-studio\/upload/);
   assert.match(imageUpload, /onDrop=/);
+  assert.match(modelUpload, /\/__content-studio\/upload\?kind=models/);
+  assert.match(modelUpload, /MAX_MODEL_BYTES = 24 \* 1024 \* 1024/);
+  assert.match(modelUpload, /onDrop=/);
+  assert.match(modelUpload, /accept=\{ACCEPTED_MODEL_TYPES\}/);
+  assert.match(sceneStudio, /updateCorePlacement/);
+  assert.match(sceneStudio, /<TransformEditor/);
+  assert.match(sceneStudio, /value="decorative"/);
+  assert.match(sceneStudio, /value="interactive"/);
+  assert.match(sceneStudio, /<ModelUploadField/);
   assert.match(aboutProfile, /about-social-links/);
   assert.match(aboutProfile, /noopener noreferrer/);
   assert.match(photographyGallery, /instant-photo-dialog/);
@@ -145,10 +172,21 @@ test("keeps the Content Studio write endpoint local to the Vite development serv
   assert.match(plugin, /configureServer/);
   assert.match(plugin, /hasLoopbackHost/);
   assert.match(plugin, /hasLoopbackOrigin/);
-  assert.match(plugin, /MAX_SAVE_BODY_BYTES = 256 \* 1024/);
-  assert.match(plugin, /MAX_UPLOAD_BODY_BYTES = 10 \* 1024 \* 1024/);
+  assert.match(plugin, /MAX_SAVE_BODY_BYTES = 24 \* 1024 \* 1024/);
+  assert.match(
+    plugin,
+    /MAX_IMAGE_UPLOAD_BODY_BYTES = 10 \* 1024 \* 1024/,
+  );
+  assert.match(
+    plugin,
+    /MAX_MODEL_UPLOAD_BODY_BYTES = 24 \* 1024 \* 1024/,
+  );
   assert.match(plugin, /\/__content-studio\/upload/);
   assert.match(plugin, /detectImageFormat/);
+  assert.match(plugin, /validateGlb/);
+  assert.match(plugin, /document\.asset\.version !== "2\.0"/);
+  assert.match(plugin, /EXTERNAL_GLB_RESOURCE/);
+  assert.match(plugin, /contentType !== "model\/gltf-binary"/);
   assert.match(plugin, /randomUUID/);
   assert.match(plugin, /public", "uploads"/);
   assert.match(plugin, /rename\(temporaryPath, path\)/);

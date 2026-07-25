@@ -1,6 +1,6 @@
 import type {
   AssetCategory,
-  AssetId,
+  CoreAssetId,
   PortfolioAsset,
 } from "./portfolio-data";
 
@@ -569,7 +569,7 @@ export const PORTFOLIO_ASSETS_EN: PortfolioAsset[] = [
 
 export const ASSET_BY_ID_EN = Object.fromEntries(
   PORTFOLIO_ASSETS_EN.map((asset) => [asset.id, asset]),
-) as Record<AssetId, PortfolioAsset>;
+) as Record<CoreAssetId, PortfolioAsset>;
 
 export const CATEGORY_ORDER_EN = [
   "Life",
