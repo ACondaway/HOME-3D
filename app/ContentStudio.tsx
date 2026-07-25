@@ -37,6 +37,7 @@ import {
 } from "./portfolio-data";
 import { PORTFOLIO_ASSETS_EN } from "./portfolio-data-en";
 import { ContentCardListEditor } from "./ContentCardEditor";
+import type { ScenePlacementEdit } from "./scene-placement";
 
 export interface ContentStudioProps {
   open: boolean;
@@ -44,9 +45,13 @@ export interface ContentStudioProps {
   config: SiteContentConfig;
   profile: ProfileContent;
   assets: PortfolioAsset[];
+  placementEdit: ScenePlacementEdit | null;
   onChange: Dispatch<SetStateAction<SiteContentConfig>>;
   onLocaleChange: (locale: ContentLocale) => void;
   onClose: () => void;
+  onPlacementEditStart: (assetId: string) => void;
+  onPlacementEditConfirm: () => void;
+  onPlacementEditCancel: () => void;
   onReset?: () => void;
   onProjectSaved?: (config: SiteContentConfig) => void;
 }
@@ -144,6 +149,7 @@ const TEXT = {
     imported: "JSON 已导入",
     exported: "JSON 已导出",
     copied: "JSON 已复制",
+    finishPlacement: "请先确认或取消当前物体的摆放",
     invalid: "文件不是有效的内容配置",
     invalidSocial: "请先为每个社交链接填写有效地址",
     invalidCardLinks:
@@ -226,6 +232,7 @@ const TEXT = {
     imported: "JSON imported",
     exported: "JSON exported",
     copied: "JSON copied",
+    finishPlacement: "Confirm or cancel the current placement first",
     invalid: "That file is not a valid content configuration",
     invalidSocial: "Add a valid URL for every social link before saving",
     invalidCardLinks:
@@ -351,9 +358,13 @@ export function ContentStudio({
   config,
   profile,
   assets,
+  placementEdit,
   onChange,
   onLocaleChange,
   onClose,
+  onPlacementEditStart,
+  onPlacementEditConfirm,
+  onPlacementEditCancel,
   onReset,
   onProjectSaved,
 }: ContentStudioProps) {
@@ -461,6 +472,11 @@ export function ContentStudio({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [open, scenePreview]);
+
+  useEffect(() => {
+    if (open || !placementEdit) return;
+    onPlacementEditCancel();
+  }, [onPlacementEditCancel, open, placementEdit]);
 
   useEffect(() => {
     if (!open || scenePreview) return;
@@ -785,6 +801,10 @@ export function ContentStudio({
   };
 
   const exportJson = () => {
+    if (placementEdit) {
+      setStatus(text.finishPlacement);
+      return;
+    }
     const blob = new Blob([`${JSON.stringify(config, null, 2)}\n`], {
       type: "application/json",
     });
@@ -798,6 +818,10 @@ export function ContentStudio({
   };
 
   const copyJson = async () => {
+    if (placementEdit) {
+      setStatus(text.finishPlacement);
+      return;
+    }
     try {
       await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
       setStatus(text.copied);
@@ -810,8 +834,14 @@ export function ContentStudio({
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    if (placementEdit) {
+      setStatus(text.finishPlacement);
+      return;
+    }
     try {
-      onChange(parseSiteContent(await file.text()));
+      const importedConfig = parseSiteContent(await file.text());
+      onPlacementEditCancel();
+      onChange(importedConfig);
       setStatus(text.imported);
     } catch {
       setStatus(text.invalid);
@@ -819,6 +849,10 @@ export function ContentStudio({
   };
 
   const saveProject = async () => {
+    if (placementEdit) {
+      setStatus(text.finishPlacement);
+      return;
+    }
     if (hasInvalidSocialLinks) {
       setStatus(text.invalidSocial);
       return;
@@ -867,6 +901,7 @@ export function ContentStudio({
       setResetArmed(true);
       return;
     }
+    if (placementEdit) onPlacementEditCancel();
     onReset?.();
     setResetArmed(false);
     setStatus("");
@@ -877,7 +912,7 @@ export function ContentStudio({
       ref={backdropRef}
       className={`studio-backdrop ${
         scenePreview ? "is-scene-preview" : ""
-      }`}
+      } ${placementEdit ? "is-placement-editing" : ""}`}
       role="dialog"
       aria-modal={scenePreview ? undefined : true}
       aria-labelledby="content-studio-title"
@@ -915,7 +950,10 @@ export function ContentStudio({
               ref={closeButtonRef}
               type="button"
               className="studio-close-button"
-              onClick={onClose}
+              onClick={() => {
+                if (placementEdit) onPlacementEditCancel();
+                onClose();
+              }}
               aria-label={text.close}
             >
               <span aria-hidden="true">×</span>
@@ -926,13 +964,28 @@ export function ContentStudio({
 
         <div className="studio-toolbar">
           <div className="studio-toolbar-group">
-            <button type="button" onClick={() => importRef.current?.click()}>
+            <button
+              type="button"
+              disabled={Boolean(placementEdit)}
+              title={placementEdit ? text.finishPlacement : undefined}
+              onClick={() => importRef.current?.click()}
+            >
               {text.import}
             </button>
-            <button type="button" onClick={exportJson}>
+            <button
+              type="button"
+              disabled={Boolean(placementEdit)}
+              title={placementEdit ? text.finishPlacement : undefined}
+              onClick={exportJson}
+            >
               {text.export}
             </button>
-            <button type="button" onClick={() => void copyJson()}>
+            <button
+              type="button"
+              disabled={Boolean(placementEdit)}
+              title={placementEdit ? text.finishPlacement : undefined}
+              onClick={() => void copyJson()}
+            >
               {text.copy}
             </button>
             <input
@@ -941,6 +994,7 @@ export function ContentStudio({
               accept="application/json,.json"
               className="studio-visually-hidden"
               tabIndex={-1}
+              disabled={Boolean(placementEdit)}
               onChange={(event) => void importJson(event)}
             />
           </div>
@@ -951,7 +1005,12 @@ export function ContentStudio({
                 className={`studio-scene-preview-toggle ${
                   scenePreview ? "is-active" : ""
                 }`}
-                onClick={() => setScenePreview((current) => !current)}
+                onClick={() => {
+                  if (scenePreview && placementEdit) {
+                    onPlacementEditCancel();
+                  }
+                  setScenePreview((current) => !current);
+                }}
                 aria-pressed={scenePreview}
               >
                 {scenePreview ? text.exitPreview : text.previewScene}
@@ -974,8 +1033,14 @@ export function ContentStudio({
               type="button"
               className="studio-save-button"
               onClick={() => void saveProject()}
-              disabled={!projectWritable || saving}
-              title={projectWritable ? undefined : text.localOnly}
+              disabled={!projectWritable || saving || Boolean(placementEdit)}
+              title={
+                placementEdit
+                  ? text.finishPlacement
+                  : projectWritable
+                    ? undefined
+                    : text.localOnly
+              }
             >
               {saving ? text.saving : text.save}
             </button>
@@ -993,6 +1058,7 @@ export function ContentStudio({
                 type="button"
                 className={section === "profile" ? "is-active" : ""}
                 onClick={() => {
+                  if (placementEdit) onPlacementEditCancel();
                   setSection("profile");
                   setScenePreview(false);
                 }}
@@ -1004,6 +1070,7 @@ export function ContentStudio({
                 type="button"
                 className={section === "assets" ? "is-active" : ""}
                 onClick={() => {
+                  if (placementEdit) onPlacementEditCancel();
                   setSection("assets");
                   setScenePreview(false);
                 }}
@@ -1493,7 +1560,14 @@ export function ContentStudio({
                 config={config}
                 assets={coreAssets}
                 projectWritable={projectWritable}
+                placementEdit={placementEdit}
                 onChange={onChange}
+                onPlacementEditStart={(assetId) => {
+                  setScenePreview(true);
+                  onPlacementEditStart(assetId);
+                }}
+                onPlacementEditConfirm={onPlacementEditConfirm}
+                onPlacementEditCancel={onPlacementEditCancel}
               />
             )}
           </div>

@@ -28,13 +28,18 @@ import {
   type PortfolioAsset,
 } from "./portfolio-data";
 import { ContentCardListEditor } from "./ContentCardEditor";
+import type { ScenePlacementEdit } from "./scene-placement";
 
 interface SceneStudioProps {
   locale: ContentLocale;
   config: SiteContentConfig;
   assets: PortfolioAsset[];
   projectWritable: boolean;
+  placementEdit: ScenePlacementEdit | null;
   onChange: Dispatch<SetStateAction<SiteContentConfig>>;
+  onPlacementEditStart: (assetId: string) => void;
+  onPlacementEditConfirm: () => void;
+  onPlacementEditCancel: () => void;
 }
 
 type TransformKey = keyof SceneTransform;
@@ -183,6 +188,7 @@ function NumberField({
   min,
   max,
   step,
+  disabled = false,
   onChange,
 }: {
   label: string;
@@ -190,6 +196,7 @@ function NumberField({
   min: number;
   max: number;
   step: number;
+  disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -223,6 +230,7 @@ function NumberField({
         max={max}
         step={step}
         inputMode="decimal"
+        disabled={disabled}
         onChange={(event) => {
           const nextDraft = event.target.value;
           setDraft(nextDraft);
@@ -245,11 +253,13 @@ function TransformEditor({
   transform,
   relative,
   locale,
+  disabled = false,
   onChange,
 }: {
   transform: SceneTransform;
   relative: boolean;
   locale: ContentLocale;
+  disabled?: boolean;
   onChange: (key: TransformKey, value: SceneVector3) => void;
 }) {
   const copy =
@@ -288,6 +298,7 @@ function TransformEditor({
                   min={limits.min}
                   max={limits.max}
                   step={step}
+                  disabled={disabled}
                   onChange={(value) => {
                     const next = cloneVector(transform[key]);
                     next[index] = value;
@@ -308,7 +319,11 @@ export function SceneStudio({
   config,
   assets,
   projectWritable,
+  placementEdit,
   onChange,
+  onPlacementEditStart,
+  onPlacementEditConfirm,
+  onPlacementEditCancel,
 }: SceneStudioProps) {
   const copy =
     locale === "zh"
@@ -324,6 +339,15 @@ export function SceneStudio({
           placement: "物件变换",
           placementHelp:
             "现有物件使用相对原始位置的偏移；旋转单位为度，缩放 1 表示保持原尺寸。",
+          dragPlacement: "拖动摆放",
+          dragPlacementActive: "正在摆放",
+          dragPlacementHelp:
+            "进入后，在房间画面中直接拖动物体。拖动只改变 X / Z；确认或取消后，可继续用数值设置高度、旋转和缩放。",
+          dragPlacementArmed:
+            "已进入摆放模式。拖动选中物体预览新位置，然后确认或取消。",
+          confirmPlacement: "确认位置",
+          cancelPlacement: "取消摆放",
+          placementCoordinates: "预览坐标",
           reset: "恢复原始位置",
           model: "3D 模型",
           modelHelp:
@@ -376,6 +400,15 @@ export function SceneStudio({
           placement: "Object transform",
           placementHelp:
             "Existing objects use offsets from their authored position. Rotation is in degrees; scale 1 keeps the original size.",
+          dragPlacement: "Drag to place",
+          dragPlacementActive: "Placing object",
+          dragPlacementHelp:
+            "Drag the object directly in the room view. Dragging changes X / Z only; after confirming or cancelling, use the numeric controls for height, rotation, and scale.",
+          dragPlacementArmed:
+            "Placement mode is active. Drag the selected object to preview its new position, then confirm or cancel.",
+          confirmPlacement: "Confirm position",
+          cancelPlacement: "Cancel placement",
+          placementCoordinates: "Preview coordinates",
           reset: "Restore original placement",
           model: "3D model",
           modelHelp:
@@ -439,9 +472,13 @@ export function SceneStudio({
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(
     null,
   );
+  const placementStartRef = useRef<HTMLButtonElement>(null);
+  const previousPlacementIdRef = useRef<string | null>(null);
   const effectiveSelectedId = allIds.includes(selectedId)
     ? selectedId
     : (allIds[0] ?? "music");
+  const placementIsActive =
+    placementEdit?.assetId === effectiveSelectedId;
 
   const selectedCoreAsset = coreAssets.find(
     (asset) => asset.id === effectiveSelectedId,
@@ -459,6 +496,44 @@ export function SceneStudio({
     const timeout = window.setTimeout(() => setPendingRemovalId(null), 2600);
     return () => window.clearTimeout(timeout);
   }, [pendingRemovalId]);
+
+  useEffect(() => {
+    if (placementEdit && !allIds.includes(placementEdit.assetId)) {
+      onPlacementEditCancel();
+    }
+  }, [allIds, onPlacementEditCancel, placementEdit]);
+
+  useEffect(() => {
+    const previousPlacementId = previousPlacementIdRef.current;
+    previousPlacementIdRef.current = placementEdit?.assetId ?? null;
+    if (
+      !previousPlacementId ||
+      placementEdit ||
+      previousPlacementId !== effectiveSelectedId
+    ) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const activeElement = document.activeElement;
+      if (
+        activeElement instanceof HTMLElement &&
+        activeElement !== document.body &&
+        activeElement.isConnected
+      ) {
+        return;
+      }
+      placementStartRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [effectiveSelectedId, placementEdit]);
+
+  const selectAsset = (assetId: string) => {
+    setPendingRemovalId(null);
+    if (placementEdit && placementEdit.assetId !== assetId) {
+      onPlacementEditCancel();
+    }
+    setSelectedId(assetId);
+  };
 
   const updateCorePlacement = (
     id: CoreAssetId,
@@ -481,6 +556,7 @@ export function SceneStudio({
   };
 
   const resetCorePlacement = (id: CoreAssetId) => {
+    if (placementEdit?.assetId === id) onPlacementEditCancel();
     onChange((current) => {
       const placements = { ...current.scene?.placements };
       delete placements[id];
@@ -511,6 +587,7 @@ export function SceneStudio({
 
   const addCustomAsset = () => {
     if (customAssets.length >= CONTENT_LIMITS.scene.customAssets) return;
+    if (placementEdit) onPlacementEditCancel();
     const asset = createDefaultCustomAsset();
     onChange((current) => ({
       ...current,
@@ -524,6 +601,7 @@ export function SceneStudio({
   };
 
   const removeCustomAsset = (id: CustomSceneAsset["id"]) => {
+    if (placementEdit?.assetId === id) onPlacementEditCancel();
     setPendingRemovalId(null);
     onChange((current) => ({
       ...current,
@@ -541,7 +619,9 @@ export function SceneStudio({
     : undefined;
   const coreTransform: SceneTransform = {
     position: cloneVector(
-      corePlacement?.position ?? DEFAULT_SCENE_TRANSFORM.position,
+      placementIsActive && placementEdit
+        ? placementEdit.position
+        : (corePlacement?.position ?? DEFAULT_SCENE_TRANSFORM.position),
     ),
     rotation: cloneVector(
       corePlacement?.rotation ?? DEFAULT_SCENE_TRANSFORM.rotation,
@@ -550,6 +630,16 @@ export function SceneStudio({
       corePlacement?.scale ?? DEFAULT_SCENE_TRANSFORM.scale,
     ),
   };
+  const customTransform: SceneTransform | undefined = selectedCustomAsset
+    ? {
+        ...selectedCustomAsset.transform,
+        position: cloneVector(
+          placementIsActive && placementEdit
+            ? placementEdit.position
+            : selectedCustomAsset.transform.position,
+        ),
+      }
+    : undefined;
 
   const customContent = selectedCustomAsset?.content[locale] ?? {};
   const customMetrics = customContent.metrics ?? [];
@@ -569,6 +659,61 @@ export function SceneStudio({
         },
       },
     }));
+  };
+
+  const renderPlacementToolbar = (assetId: string) => {
+    const active = placementEdit?.assetId === assetId;
+    return (
+      <div
+        className={`studio-placement-toolbar ${active ? "is-active" : ""}`}
+      >
+        <div className="studio-placement-status">
+          <strong>
+            {active ? copy.dragPlacementActive : copy.dragPlacement}
+          </strong>
+          <p>{active ? copy.dragPlacementArmed : copy.dragPlacementHelp}</p>
+          {active && (
+            <code
+              className="studio-placement-coordinates"
+              aria-label={copy.placementCoordinates}
+            >
+              X {placementEdit.position[0].toFixed(2)} · Y{" "}
+              {placementEdit.position[1].toFixed(2)} · Z{" "}
+              {placementEdit.position[2].toFixed(2)}
+            </code>
+          )}
+        </div>
+        <div className="studio-placement-actions">
+          {active ? (
+            <>
+              <button
+                type="button"
+                className="studio-placement-confirm"
+                onClick={onPlacementEditConfirm}
+              >
+                {copy.confirmPlacement}
+              </button>
+              <button
+                type="button"
+                className="studio-placement-cancel"
+                onClick={onPlacementEditCancel}
+              >
+                {copy.cancelPlacement}
+              </button>
+            </>
+          ) : (
+            <button
+              ref={placementStartRef}
+              type="button"
+              className="studio-placement-start"
+              onClick={() => onPlacementEditStart(assetId)}
+            >
+              {copy.dragPlacement}
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -603,14 +748,16 @@ export function SceneStudio({
             <button
               type="button"
               aria-pressed={effectiveSelectedId === asset.id}
-              className={
-                effectiveSelectedId === asset.id ? "is-active" : ""
-              }
+              className={[
+                effectiveSelectedId === asset.id ? "is-active" : "",
+                placementEdit?.assetId === asset.id
+                  ? "is-placement-target"
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               key={asset.id}
-              onClick={() => {
-                setPendingRemovalId(null);
-                setSelectedId(asset.id);
-              }}
+              onClick={() => selectAsset(asset.id)}
             >
               <span>{asset.number}</span>
               <strong>{asset.objectLabel}</strong>
@@ -622,14 +769,16 @@ export function SceneStudio({
             <button
               type="button"
               aria-pressed={effectiveSelectedId === asset.id}
-              className={
-                effectiveSelectedId === asset.id ? "is-active" : ""
-              }
+              className={[
+                effectiveSelectedId === asset.id ? "is-active" : "",
+                placementEdit?.assetId === asset.id
+                  ? "is-placement-target"
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               key={asset.id}
-              onClick={() => {
-                setPendingRemovalId(null);
-                setSelectedId(asset.id);
-              }}
+              onClick={() => selectAsset(asset.id)}
             >
               <span>
                 {asset.behavior === "interactive"
@@ -674,10 +823,12 @@ export function SceneStudio({
             </button>
           }
         >
+          {renderPlacementToolbar(selectedCoreId)}
           <TransformEditor
             transform={coreTransform}
             relative
             locale={locale}
+            disabled={placementIsActive}
             onChange={(key, value) =>
               updateCorePlacement(selectedCoreId, key, value)
             }
@@ -763,20 +914,24 @@ export function SceneStudio({
           </StudioSection>
 
           <StudioSection title={copy.transform} description={copy.transformHelp}>
-            <TransformEditor
-              transform={selectedCustomAsset.transform}
-              relative={false}
-              locale={locale}
-              onChange={(key, value) =>
-                updateCustomAsset(selectedCustomAsset.id, (asset) => ({
-                  ...asset,
-                  transform: {
-                    ...asset.transform,
-                    [key]: value,
-                  },
-                }))
-              }
-            />
+            {renderPlacementToolbar(selectedCustomAsset.id)}
+            {customTransform && (
+              <TransformEditor
+                transform={customTransform}
+                relative={false}
+                locale={locale}
+                disabled={placementIsActive}
+                onChange={(key, value) =>
+                  updateCustomAsset(selectedCustomAsset.id, (asset) => ({
+                    ...asset,
+                    transform: {
+                      ...asset.transform,
+                      [key]: value,
+                    },
+                  }))
+                }
+              />
+            )}
           </StudioSection>
 
           {selectedCustomAsset.behavior === "interactive" && (

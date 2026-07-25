@@ -11,7 +11,7 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "deploy": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext deploy",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --experimental-strip-types --test tests/content-config.test.mts tests/content-studio-upload.test.mts tests/rendered-html.test.mjs tests/solar-lighting.test.mts",
+    "test": "npm run build && node --experimental-strip-types --test tests/content-config.test.mts tests/content-studio-upload.test.mts tests/rendered-html.test.mjs tests/scene-placement.test.mts tests/solar-lighting.test.mts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {

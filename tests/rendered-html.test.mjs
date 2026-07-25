@@ -60,6 +60,7 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
     imageUpload,
     modelUpload,
     sceneStudio,
+    scenePlacement,
     contentCardEditor,
     globalStyles,
   ] = await Promise.all([
@@ -76,6 +77,7 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
     readFile(new URL("../app/ImageUploadField.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ModelUploadField.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/SceneStudio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/scene-placement.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/ContentCardEditor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
@@ -94,6 +96,12 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(room, /params\.get\("studio"\)/);
   assert.match(room, /GLTFLoader/);
   assert.match(room, /applyCorePlacement/);
+  assert.match(room, /setPointerCapture/);
+  assert.match(room, /lostpointercapture/);
+  assert.match(room, /clearOrbitMomentum/);
+  assert.match(room, /getNormalMatrix/);
+  assert.match(room, /onPlacementPreview/);
+  assert.match(room, /scene-placement-hud/);
   assert.match(room, /asset\.behavior !== "interactive"/);
   assert.match(room, /handleRef\.current\?\.sync\(sceneConfig, assets\)/);
   assert.match(room, /runtimeAssetById/);
@@ -124,6 +132,9 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(studio, /photography-spotlight/);
   assert.match(studio, /<SceneStudio/);
   assert.match(studio, /is-scene-preview/);
+  assert.match(studio, /onPlacementEditCancel/);
+  assert.match(studio, /disabled=\{Boolean\(placementEdit\)\}/);
+  assert.match(studio, /finishPlacement/);
   assert.match(studio, /setAttribute\("inert", ""\)/);
   assert.match(studio, /new TextEncoder\(\)/);
   assert.match(studio, /<ContentCardListEditor/);
@@ -137,10 +148,15 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(modelUpload, /accept=\{ACCEPTED_MODEL_TYPES\}/);
   assert.match(sceneStudio, /updateCorePlacement/);
   assert.match(sceneStudio, /<TransformEditor/);
+  assert.match(sceneStudio, /studio-placement-toolbar/);
+  assert.match(sceneStudio, /onPlacementEditConfirm/);
   assert.match(sceneStudio, /value="decorative"/);
   assert.match(sceneStudio, /value="interactive"/);
   assert.match(sceneStudio, /<ModelUploadField/);
   assert.match(sceneStudio, /<ContentCardListEditor/);
+  assert.match(scenePlacement, /beginScenePlacementEdit/);
+  assert.match(scenePlacement, /commitScenePlacementEdit/);
+  assert.match(scenePlacement, /constrainScenePlacementPosition/);
   assert.match(contentCardEditor, /const CARD_KINDS =/);
   assert.match(contentCardEditor, /"text"/);
   assert.match(contentCardEditor, /"media"/);
