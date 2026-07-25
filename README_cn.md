@@ -2,10 +2,7 @@
 
 <p><sub>一个可交互的个人数字空间</sub></p>
 
-<h1>
-  <img src=".github/assets/living-index-logo.png" alt="" width="72">
-  &nbsp;The Living Index
-</h1>
+<h1><img src="./.github/assets/living-index-title.png" alt="The Living Index" width="768"></h1>
 
 <h3>这不是一个需要向下滚动的作品集，而是一间可以走进去的房间。</h3>
 
@@ -29,6 +26,9 @@
   </a>
   <a href="https://docs.acondawayuno.com">
     <img alt="Mintlify 文档" src="https://img.shields.io/badge/docs-Mintlify-c7a364?style=flat-square">
+  </a>
+  <a href="./LICENSE">
+    <img alt="MIT 开源许可" src="https://img.shields.io/badge/license-MIT-c7a364?style=flat-square">
   </a>
 </p>
 
@@ -107,6 +107,10 @@ Content Studio 让个人主页保持可编辑，同时避免退化成一个通�
 README 只负责项目介绍与视觉预览。本地开发、Content Studio 工作流、内容模型、自定义资产、场景摆放、校验、部署和问题排查统一维护在 Mintlify：
 
 ### **[docs.acondawayuno.com →](https://docs.acondawayuno.com)**
+
+## 📄 开源许可
+
+本项目源代码依据 [MIT License](./LICENSE) 开源。后续加入的第三方资产仍遵循各自许可证，并记录于 [ASSET_CREDITS.md](./ASSET_CREDITS.md)。
 
 <div align="center">
 

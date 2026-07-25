@@ -6,7 +6,7 @@
 
 | 本地文件 | 资产名称 | 作者 | 原始链接 | 许可 | 下载日期 | 所做修改 |
 |---|---|---|---|---|---|---|
-| `程序化场景` | The Living Index room and props | 项目作者 | 本仓库 | 项目代码许可 | 2026-07-23 | Three.js 标准几何体原创组合 |
+| `程序化场景` | The Living Index room and props | 项目作者 | 本仓库 | [MIT](./LICENSE) | 2026-07-23 | Three.js 标准几何体原创组合 |
 | `public/models/...` |  |  |  |  |  |  |
 
 ## 归档要求

@@ -1,6 +1,8 @@
 {
   "name": "the-living-index",
   "version": "0.1.0",
+  "author": "ACondawayUNo (Congsheng Xu)",
+  "license": "MIT",
   "private": true,
   "engines": {
     "node": ">=22.13.0"

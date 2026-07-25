@@ -2,10 +2,7 @@
 
 <p><sub>AN INTERACTIVE PERSONAL SPACE</sub></p>
 
-<h1>
-  <img src=".github/assets/living-index-logo.png" alt="" width="72">
-  &nbsp;The Living Index
-</h1>
+<h1><img src="./.github/assets/living-index-title.png" alt="The Living Index" width="768"></h1>
 
 <h3>A portfolio you do not scroll through — you step into it.</h3>
 
@@ -29,6 +26,9 @@
   </a>
   <a href="https://docs.acondawayuno.com">
     <img alt="Mintlify documentation" src="https://img.shields.io/badge/docs-Mintlify-c7a364?style=flat-square">
+  </a>
+  <a href="./LICENSE">
+    <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-c7a364?style=flat-square">
   </a>
 </p>
 
@@ -107,6 +107,10 @@ The room uses a deliberately direct Three.js runtime for scene lifecycle, raycas
 This README is the visual overview. Setup, local development, Content Studio workflows, content modeling, custom assets, scene placement, validation, deployment, and troubleshooting all live in the Mintlify guide:
 
 ### **[docs.acondawayuno.com →](https://docs.acondawayuno.com)**
+
+## 📄 License
+
+The source code is available under the [MIT License](./LICENSE). Third-party assets, if added, remain under their respective licenses and are documented in [ASSET_CREDITS.md](./ASSET_CREDITS.md).
 
 <div align="center">
 
