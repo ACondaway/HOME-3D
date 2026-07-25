@@ -58,6 +58,8 @@ a:focus-visible,
 }
 
 .portfolio-shell {
+  --scene-atmosphere-opacity: 1;
+  --scene-daylight: 0;
   position: relative;
   width: 100vw;
   height: 100vh;
@@ -107,10 +109,12 @@ a:focus-visible,
   z-index: 1;
   inset: 0;
   pointer-events: none;
+  opacity: var(--scene-atmosphere-opacity);
   background:
     linear-gradient(90deg, rgba(8, 16, 14, 0.36), transparent 27%, transparent 74%, rgba(8, 16, 14, 0.2)),
     linear-gradient(180deg, rgba(5, 11, 10, 0.24), transparent 24%, transparent 70%, rgba(5, 10, 9, 0.52));
   box-shadow: inset 0 0 160px rgba(3, 9, 8, 0.42);
+  transition: opacity 1.8s ease;
 }
 
 .room-atmosphere::after,
@@ -522,6 +526,7 @@ a:focus-visible,
   font-family: var(--font-mono);
   font-size: 7px;
   letter-spacing: 0.15em;
+  white-space: nowrap;
   pointer-events: none;
   transform: translate(-50%, -50%) rotate(-90deg);
 }
@@ -530,6 +535,86 @@ a:focus-visible,
   width: 42px;
   height: 1px;
   background: rgba(236, 229, 215, 0.26);
+}
+
+.room-clock-badge {
+  position: absolute;
+  z-index: 4;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  left: 34px;
+  display: grid;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid rgba(236, 229, 215, 0.2);
+  background: rgba(8, 17, 15, 0.55);
+  color: rgba(236, 229, 215, 0.84);
+  font-family: var(--font-mono);
+  letter-spacing: 0.11em;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
+.room-clock-badge > span {
+  color: var(--brass);
+  font-size: 6px;
+  letter-spacing: 0.17em;
+}
+
+.room-clock-badge time {
+  font-size: 8px;
+}
+
+.site-credit {
+  position: absolute;
+  z-index: 9;
+  right: 34px;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: rgba(236, 229, 215, 0.64);
+  font-family: var(--font-mono);
+  font-size: 7px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.site-credit a {
+  display: inline-flex;
+  height: 27px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid rgba(236, 229, 215, 0.24);
+  background: rgba(8, 17, 15, 0.52);
+  color: var(--brass);
+  pointer-events: auto;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+  backdrop-filter: blur(12px);
+}
+
+.site-credit a:hover {
+  border-color: rgba(226, 168, 95, 0.72);
+  background: rgba(8, 17, 15, 0.72);
+  color: #f2c87f;
+}
+
+.site-credit i {
+  font-style: normal;
+}
+
+.portfolio-shell.is-intro .site-credit {
+  right: 44px;
+  bottom: max(26px, env(safe-area-inset-bottom));
+}
+
+.portfolio-shell.is-intro .intro-footer blockquote {
+  margin-bottom: 32px;
 }
 
 .hover-label {
@@ -2140,6 +2225,7 @@ a:focus-visible,
 
   .intro-footer {
     grid-template-columns: repeat(3, 1fr);
+    padding-bottom: 32px;
   }
 
   .intro-footer blockquote {
@@ -2264,7 +2350,7 @@ a:focus-visible,
   .intro-footer {
     grid-template-columns: repeat(3, 1fr);
     gap: 10px;
-    padding: 13px 7px 0;
+    padding: 13px 7px 32px;
   }
 
   .intro-footer > div {
@@ -2310,6 +2396,25 @@ a:focus-visible,
     display: none;
   }
 
+  .room-clock-badge {
+    bottom: max(58px, calc(env(safe-area-inset-bottom) + 48px));
+    left: 15px;
+    padding: 8px 9px;
+  }
+
+  .site-credit,
+  .portfolio-shell.is-intro .site-credit {
+    right: 15px;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    gap: 8px;
+    font-size: 6px;
+  }
+
+  .site-credit a {
+    height: 25px;
+    padding: 0 7px;
+  }
+
   .hover-label {
     bottom: 74px;
     min-width: 240px;
@@ -2317,7 +2422,7 @@ a:focus-visible,
 
   .room-instruction {
     right: 15px;
-    bottom: max(16px, env(safe-area-inset-bottom));
+    bottom: max(58px, calc(env(safe-area-inset-bottom) + 48px));
     left: auto;
     transform: none;
   }

@@ -32,6 +32,11 @@ import {
   type SiteContentConfig,
 } from "./content-config";
 import { ContentStudio } from "./ContentStudio";
+import {
+  formatZonedTime,
+  getSolarLightingState,
+  type DayPhase,
+} from "./solar-lighting";
 
 type Locale = ContentLocale;
 
@@ -67,6 +72,15 @@ const COPY = {
     controls: "操作",
     hoverEnter: "点击进入",
     roomInstruction: "拖动环顾 · 滚轮缩放 · 点按探索",
+    localTime: "当地时间",
+    copyrightLabel: "个人版权与源代码",
+    githubLabel: "在 GitHub 查看源代码",
+    dayPhases: {
+      night: "夜间灯光",
+      dawn: "晨光",
+      day: "日光",
+      dusk: "暮色",
+    },
     close: "关闭并返回房间",
     closeIndex: "关闭内容索引",
     closeHelp: "关闭操作帮助",
@@ -127,6 +141,15 @@ const COPY = {
     controls: "Help",
     hoverEnter: "Select to enter",
     roomInstruction: "Drag to orbit · Scroll to zoom · Select to explore",
+    localTime: "Local time",
+    copyrightLabel: "Copyright and source code",
+    githubLabel: "View source code on GitHub",
+    dayPhases: {
+      night: "NIGHT LIGHTS",
+      dawn: "DAWN",
+      day: "DAYLIGHT",
+      dusk: "DUSK",
+    },
     close: "Close and return to the room",
     closeIndex: "Close the content index",
     closeHelp: "Close controls help",
@@ -185,6 +208,7 @@ interface RoomSceneProps {
   activeId: AssetId | null;
   resetSignal: number;
   sceneLabel: string;
+  timeZone: string;
   onSelect: (id: AssetId) => void;
   onHover: (id: AssetId | null) => void;
   onReady: () => void;
@@ -192,6 +216,17 @@ interface RoomSceneProps {
 }
 
 type AnimateCallback = (elapsed: number, delta: number) => void;
+
+interface RoomShellLighting {
+  bulbMaterial: THREE.MeshStandardMaterial;
+  sunlight: THREE.Mesh;
+  sunlightMaterial: THREE.MeshBasicMaterial;
+  windowMaterial: THREE.MeshStandardMaterial;
+}
+
+interface SceneAssetLighting {
+  deskLampMaterial: THREE.MeshStandardMaterial;
+}
 
 function standardMaterial(
   color: THREE.ColorRepresentation,
@@ -382,12 +417,18 @@ function createRoomShell(scene: THREE.Scene) {
   windowGroup.position.set(-7.86, 3.75, -3.35);
   windowGroup.rotation.y = Math.PI / 2;
   room.add(windowGroup);
-  addBox(windowGroup, [3.15, 2.35, 0.08], [0, 0, 0], "#607f88", {
-    roughness: 0.25,
-    metalness: 0.12,
-    emissive: "#8db9c2",
-    emissiveIntensity: 0.24,
-  });
+  const windowPane = addBox(
+    windowGroup,
+    [3.15, 2.35, 0.08],
+    [0, 0, 0],
+    "#607f88",
+    {
+      roughness: 0.25,
+      metalness: 0.12,
+      emissive: "#8db9c2",
+      emissiveIntensity: 0.24,
+    },
+  );
   addBox(windowGroup, [3.45, 0.15, 0.16], [0, 1.25, 0.04], "#7a5b42");
   addBox(windowGroup, [3.45, 0.15, 0.16], [0, -1.25, 0.04], "#7a5b42");
   addBox(windowGroup, [0.15, 2.65, 0.16], [-1.65, 0, 0.04], "#7a5b42");
@@ -395,15 +436,16 @@ function createRoomShell(scene: THREE.Scene) {
   addBox(windowGroup, [0.09, 2.4, 0.13], [0, 0, 0.06], "#8f7054");
   addBox(windowGroup, [3.2, 0.09, 0.13], [0, 0, 0.06], "#8f7054");
 
+  const sunlightMaterial = new THREE.MeshBasicMaterial({
+    color: "#e6c790",
+    transparent: true,
+    opacity: 0.055,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
   const sunlight = new THREE.Mesh(
     new THREE.PlaneGeometry(4.8, 3.6),
-    new THREE.MeshBasicMaterial({
-      color: "#e6c790",
-      transparent: true,
-      opacity: 0.055,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    }),
+    sunlightMaterial,
   );
   sunlight.position.set(-4.8, 0.13, -1.8);
   sunlight.rotation.x = -Math.PI / 2;
@@ -425,11 +467,24 @@ function createRoomShell(scene: THREE.Scene) {
     roughness: 0.4,
     metalness: 0.5,
   });
-  const bulb = addSphere(room, 0.16, [0.1, 4.58, -0.5], "#f1d6a2", [1, 1.18, 1], 0.15);
-  (bulb.material as THREE.MeshStandardMaterial).emissive.set("#f4c77c");
-  (bulb.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.6;
+  const bulb = addSphere(
+    room,
+    0.16,
+    [0.1, 4.58, -0.5],
+    "#f1d6a2",
+    [1, 1.18, 1],
+    0.15,
+  );
+  const bulbMaterial = bulb.material as THREE.MeshStandardMaterial;
+  bulbMaterial.emissive.set("#f4c77c");
+  bulbMaterial.emissiveIntensity = 1.6;
 
-  return room;
+  return {
+    bulbMaterial,
+    sunlight,
+    sunlightMaterial,
+    windowMaterial: windowPane.material as THREE.MeshStandardMaterial,
+  } satisfies RoomShellLighting;
 }
 
 function createMusicAsset(
@@ -675,12 +730,23 @@ function createResearchAndContactAssets(
     },
   );
   lampArm.castShadow = false;
-  addCylinder(desk, 0.24, 0.38, 0.38, [-1.22, 1.96, -0.28], "#b78c55", {
-    rotation: [0, 0, 0.42],
-    segments: 32,
-    roughness: 0.4,
-    metalness: 0.55,
-  });
+  const deskLamp = addCylinder(
+    desk,
+    0.24,
+    0.38,
+    0.38,
+    [-1.22, 1.96, -0.28],
+    "#b78c55",
+    {
+      rotation: [0, 0, 0.42],
+      segments: 32,
+      roughness: 0.4,
+      metalness: 0.55,
+    },
+  );
+  const deskLampMaterial = deskLamp.material as THREE.MeshStandardMaterial;
+  deskLampMaterial.emissive.set("#d99a52");
+  deskLampMaterial.emissiveIntensity = 0.1;
 
   addHitbox(desk, "research", [2.15, 2.05, 1.5], [-0.55, 1.25, 0], hitboxes);
   addSignal(desk, "research", [-1.68, 1.18, 0.58]);
@@ -713,6 +779,8 @@ function createResearchAndContactAssets(
     (screen.material as THREE.MeshStandardMaterial).emissiveIntensity =
       0.45 + Math.sin(elapsed * 1.2) * 0.08;
   });
+
+  return deskLampMaterial;
 }
 
 function createMakingAsset(
@@ -1044,7 +1112,11 @@ function createSceneAssets(
   createMusicAsset(scene, hitboxes, animated);
   createReadingAsset(scene, hitboxes);
   createFitnessAsset(scene, hitboxes);
-  createResearchAndContactAssets(scene, hitboxes, animated);
+  const deskLampMaterial = createResearchAndContactAssets(
+    scene,
+    hitboxes,
+    animated,
+  );
   createMakingAsset(scene, hitboxes, animated);
   createPhotographyAsset(scene, hitboxes);
   createRitualAsset(scene, hitboxes, animated);
@@ -1052,12 +1124,70 @@ function createSceneAssets(
   createAboutAsset(scene, hitboxes);
   createTravelAsset(scene, hitboxes);
   createFutureAsset(scene, hitboxes, animated);
+
+  return { deskLampMaterial } satisfies SceneAssetLighting;
+}
+
+function ZonedClock({
+  locale,
+  timeZone,
+}: {
+  locale: Locale;
+  timeZone: string;
+}) {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [timeZone]);
+
+  const lighting = useMemo(
+    () => getSolarLightingState(now, timeZone),
+    [now, timeZone],
+  );
+  const phase: DayPhase = lighting.phase;
+  const time = formatZonedTime(
+    now,
+    timeZone,
+    locale === "zh" ? "zh-CN" : "en-US",
+  );
+  const copy = COPY[locale];
+
+  return (
+    <time
+      dateTime={now.toISOString()}
+      title={lighting.resolvedTimeZone}
+      aria-label={`${copy.localTime} ${time}，${copy.dayPhases[phase]}`}
+    >
+      {time} · {copy.dayPhases[phase]}
+    </time>
+  );
+}
+
+function SiteCredit({ locale }: { locale: Locale }) {
+  const copy = COPY[locale];
+
+  return (
+    <footer className="site-credit" aria-label={copy.copyrightLabel}>
+      <span>© Copyright by ACondawayUNo, Congsheng Xu</span>
+      <a
+        href="https://github.com/ACondaway/HOME-3D"
+        target="_blank"
+        rel="noreferrer noopener"
+        aria-label={copy.githubLabel}
+      >
+        GitHub <i aria-hidden="true">↗</i>
+      </a>
+    </footer>
+  );
 }
 
 function RoomScene({
   activeId,
   resetSignal,
   sceneLabel,
+  timeZone,
   onSelect,
   onHover,
   onReady,
@@ -1069,6 +1199,8 @@ function RoomScene({
   const onHoverRef = useRef(onHover);
   const onReadyRef = useRef(onReady);
   const onErrorRef = useRef(onError);
+  const timeZoneRef = useRef(timeZone);
+  const lightingUpdateRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -1076,6 +1208,11 @@ function RoomScene({
     onReadyRef.current = onReady;
     onErrorRef.current = onError;
   });
+
+  useEffect(() => {
+    timeZoneRef.current = timeZone;
+    lightingUpdateRef.current?.();
+  }, [timeZone]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -1137,6 +1274,9 @@ function RoomScene({
     key.shadow.camera.bottom = -10;
     key.shadow.bias = -0.00035;
     scene.add(key);
+    const moon = new THREE.DirectionalLight("#8ea9d2", 0.22);
+    moon.position.set(6, 8, 4);
+    scene.add(moon);
     const warm = new THREE.PointLight("#e9a861", 13, 10, 2.1);
     warm.position.set(0.1, 4.4, -0.5);
     scene.add(warm);
@@ -1144,10 +1284,13 @@ function RoomScene({
     fill.position.set(5.5, 3.2, 2.8);
     scene.add(fill);
 
-    createRoomShell(scene);
+    const roomLighting = createRoomShell(scene);
     const hitboxes: THREE.Mesh[] = [];
     const animated: AnimateCallback[] = [];
-    createSceneAssets(scene, hitboxes, animated);
+    const assetLighting = createSceneAssets(scene, hitboxes, animated);
+    const deskLight = new THREE.PointLight("#f0a95f", 0, 5.5, 2);
+    deskLight.position.set(-0.77, 1.78, -3.93);
+    scene.add(deskLight);
 
     const markerMaterial = new THREE.MeshBasicMaterial({
       color: "#e2a85f",
@@ -1181,6 +1324,115 @@ function RoomScene({
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     );
+    const shell = host.closest<HTMLElement>(".portfolio-shell");
+    const backgroundColor = scene.background as THREE.Color;
+    const nightBackground = new THREE.Color("#071018");
+    const dayBackground = new THREE.Color("#29423d");
+    const twilightBackground = new THREE.Color("#4b3028");
+    const nightHemiSky = new THREE.Color("#263650");
+    const dayHemiSky = new THREE.Color("#b7d2ca");
+    const nightHemiGround = new THREE.Color("#130f18");
+    const dayHemiGround = new THREE.Color("#554034");
+    const horizonSunColor = new THREE.Color("#ff9d62");
+    const highSunColor = new THREE.Color("#ffe3b2");
+    const nightWindowColor = new THREE.Color("#41617d");
+    const dayWindowColor = new THREE.Color("#a8d3d1");
+    const workingColor = new THREE.Color();
+
+    const applyLighting = () => {
+      const lighting = getSolarLightingState(
+        new Date(),
+        timeZoneRef.current,
+      );
+      const daylight = THREE.MathUtils.clamp(lighting.daylight, 0, 1);
+      const artificialLight = THREE.MathUtils.clamp(
+        lighting.artificialLight,
+        0,
+        1,
+      );
+      const twilight = THREE.MathUtils.clamp(lighting.twilight, 0, 1);
+      const sunHeight = THREE.MathUtils.clamp(lighting.sunHeight, 0, 1);
+      const sunProgress = THREE.MathUtils.clamp(
+        lighting.sunProgress,
+        0,
+        1,
+      );
+
+      workingColor.copy(nightBackground).lerp(dayBackground, daylight);
+      workingColor.lerp(twilightBackground, twilight * 0.38);
+      backgroundColor.copy(workingColor);
+      if (scene.fog) scene.fog.color.copy(workingColor);
+
+      hemi.color
+        .copy(nightHemiSky)
+        .lerp(dayHemiSky, daylight);
+      hemi.groundColor
+        .copy(nightHemiGround)
+        .lerp(dayHemiGround, daylight);
+      hemi.intensity = 0.34 + daylight * 1.24;
+
+      workingColor
+        .copy(horizonSunColor)
+        .lerp(highSunColor, sunHeight);
+      key.color.copy(workingColor);
+      key.intensity =
+        daylight * (0.5 + 2.75 * Math.pow(sunHeight, 0.58));
+      const sunAngle = (sunProgress - 0.5) * Math.PI * 0.92;
+      key.position.set(
+        -7.35,
+        1.1 + sunHeight * 13.5,
+        Math.sin(sunAngle) * 11.5,
+      );
+      moon.intensity = artificialLight * 0.22;
+
+      warm.intensity = 0.45 + artificialLight * 13.5;
+      fill.intensity = 0.75 + daylight * 3.65;
+      deskLight.intensity = artificialLight * 7.2;
+      roomLighting.bulbMaterial.emissiveIntensity =
+        0.18 + artificialLight * 2.35;
+      assetLighting.deskLampMaterial.emissiveIntensity =
+        0.04 + artificialLight * 1.25;
+
+      workingColor
+        .copy(nightWindowColor)
+        .lerp(dayWindowColor, daylight);
+      roomLighting.windowMaterial.color.copy(workingColor);
+      roomLighting.windowMaterial.emissive.copy(workingColor);
+      roomLighting.windowMaterial.emissiveIntensity =
+        0.08 + daylight * 0.34 + twilight * 0.12;
+
+      roomLighting.sunlight.visible = daylight > 0.025;
+      roomLighting.sunlightMaterial.opacity =
+        daylight * (0.018 + sunHeight * 0.07);
+      roomLighting.sunlightMaterial.color
+        .copy(horizonSunColor)
+        .lerp(highSunColor, sunHeight);
+      roomLighting.sunlight.position.set(
+        -5.5 + sunProgress * 1.8,
+        0.13,
+        -3.25 + sunProgress * 3.5,
+      );
+      roomLighting.sunlight.rotation.z = -0.48 + sunProgress * 0.72;
+
+      renderer.toneMappingExposure =
+        0.92 + daylight * 0.2 + artificialLight * 0.07;
+
+      if (shell) {
+        shell.dataset.dayPhase = lighting.phase;
+        shell.dataset.sceneTimeZone = lighting.resolvedTimeZone;
+        shell.style.setProperty(
+          "--scene-daylight",
+          daylight.toFixed(3),
+        );
+        shell.style.setProperty(
+          "--scene-atmosphere-opacity",
+          (1 - daylight * 0.3).toFixed(3),
+        );
+      }
+    };
+    lightingUpdateRef.current = applyLighting;
+    applyLighting();
+    const lightingTimer = window.setInterval(applyLighting, 30_000);
 
     const setPointer = (event: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -1301,6 +1553,7 @@ function RoomScene({
     const handleVisibility = () => {
       isVisible = !document.hidden;
       lastFrame = performance.now();
+      if (isVisible) applyLighting();
     };
 
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
@@ -1413,6 +1666,14 @@ function RoomScene({
 
     return () => {
       handleRef.current = null;
+      lightingUpdateRef.current = null;
+      window.clearInterval(lightingTimer);
+      if (shell) {
+        delete shell.dataset.dayPhase;
+        delete shell.dataset.sceneTimeZone;
+        shell.style.removeProperty("--scene-daylight");
+        shell.style.removeProperty("--scene-atmosphere-opacity");
+      }
       renderer.setAnimationLoop(null);
       resizeObserver.disconnect();
       document.removeEventListener("visibilitychange", handleVisibility);
@@ -2231,6 +2492,7 @@ export default function RoomExperience() {
         activeId={activeId}
         resetSignal={resetSignal}
         sceneLabel={copy.sceneLabel}
+        timeZone={profile.timezone}
         onSelect={(id) => openAsset(id)}
         onHover={setHoveredId}
         onReady={() => setReady(true)}
@@ -2436,6 +2698,11 @@ export default function RoomExperience() {
             </span>
           </div>
 
+          <div className="room-clock-badge">
+            <span>{profile.city.toUpperCase()}</span>
+            <ZonedClock locale={locale} timeZone={profile.timezone} />
+          </div>
+
           <div
             className={`hover-label ${hoveredAsset ? "is-visible" : ""}`}
             aria-live="polite"
@@ -2461,6 +2728,8 @@ export default function RoomExperience() {
           </div>
         </>
       )}
+
+      <SiteCredit locale={locale} />
 
       <AssetIndex
         open={indexOpen}

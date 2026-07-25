@@ -10,5 +10,30 @@
       "logoInitial": "A"
     }
   },
-  "assets": {}
+  "assets": {
+    "zh": {
+      "contact": {
+        "entries": [
+          {
+            "eyebrow": "WELCOME",
+            "title": "研究与交互叙事",
+            "body": "尤其欢迎有关知识工具、空间界面、文化内容和公共价值的长期问题。",
+            "meta": "Project collaboration"
+          },
+          {
+            "eyebrow": "ALSO",
+            "title": "分享一段正在形成的想法",
+            "body": "它可以不完整。一次有准备的交流，常常比一次漂亮的提案更有价值。",
+            "meta": "Conversation · 30 min"
+          },
+          {
+            "eyebrow": "CONTACT",
+            "title": "acondaway@sjtu.edu.cn",
+            "body": "在上线前替换邮箱、社交链接和个人域名；不要把真实私人号码直接写入公开页面。",
+            "meta": "Email · Preferred"
+          }
+        ]
+      }
+    }
+  }
 }

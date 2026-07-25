@@ -40,6 +40,11 @@ test("server-renders the finished personal-room experience", async () => {
   assert.match(html, /欢迎来/);
   assert.match(html, /打开内容索引/);
   assert.match(html, /个人空间 · 2026/);
+  assert.match(html, /Copyright by ACondawayUNo, Congsheng Xu/);
+  assert.match(
+    html,
+    /href="https:\/\/github\.com\/ACondaway\/HOME-3D"/,
+  );
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
