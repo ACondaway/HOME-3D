@@ -60,6 +60,8 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
     imageUpload,
     modelUpload,
     sceneStudio,
+    contentCardEditor,
+    globalStyles,
   ] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -74,6 +76,8 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
     readFile(new URL("../app/ImageUploadField.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ModelUploadField.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/SceneStudio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ContentCardEditor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<RoomExperience \/>/);
@@ -122,7 +126,10 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(studio, /is-scene-preview/);
   assert.match(studio, /setAttribute\("inert", ""\)/);
   assert.match(studio, /new TextEncoder\(\)/);
+  assert.match(studio, /<ContentCardListEditor/);
+  assert.match(studio, /resolveContentCardKind\(entry\) === "links"/);
   assert.match(imageUpload, /\/__content-studio\/upload/);
+  assert.match(imageUpload, /"profile" \| "photography" \| "cards"/);
   assert.match(imageUpload, /onDrop=/);
   assert.match(modelUpload, /\/__content-studio\/upload\?kind=models/);
   assert.match(modelUpload, /MAX_MODEL_BYTES = 24 \* 1024 \* 1024/);
@@ -133,6 +140,30 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(sceneStudio, /value="decorative"/);
   assert.match(sceneStudio, /value="interactive"/);
   assert.match(sceneStudio, /<ModelUploadField/);
+  assert.match(sceneStudio, /<ContentCardListEditor/);
+  assert.match(contentCardEditor, /const CARD_KINDS =/);
+  assert.match(contentCardEditor, /"text"/);
+  assert.match(contentCardEditor, /"media"/);
+  assert.match(contentCardEditor, /"links"/);
+  assert.match(contentCardEditor, /const CARD_WIDTHS =/);
+  assert.match(contentCardEditor, /kind="cards"/);
+  assert.match(contentCardEditor, /className="studio-card-link-row"/);
+  assert.match(
+    contentCardEditor,
+    /entriesRef\.current\.map\(\(entry, entryIndex\)/,
+  );
+  assert.match(contentCardEditor, /updateUploadedImage/);
+  assert.match(contentCardEditor, /if \(!mountedRef\.current\) return/);
+  assert.doesNotMatch(
+    contentCardEditor,
+    /withStableIds\(entries\)\.map\(\(entry, entryIndex\)/,
+  );
+  assert.match(room, /entry-card--\$\{kind\} entry-card--\$\{width\}/);
+  assert.match(room, /className="entry-card-media"/);
+  assert.match(room, /className="entry-card-links"/);
+  assert.match(globalStyles, /\.studio-card-type-grid/);
+  assert.match(globalStyles, /\.studio-card-template-actions/);
+  assert.match(globalStyles, /\.entry-card--full/);
   assert.match(aboutProfile, /about-social-links/);
   assert.match(aboutProfile, /noopener noreferrer/);
   assert.match(photographyGallery, /instant-photo-dialog/);
@@ -189,6 +220,9 @@ test("keeps the Content Studio write endpoint local to the Vite development serv
   assert.match(plugin, /contentType !== "model\/gltf-binary"/);
   assert.match(plugin, /randomUUID/);
   assert.match(plugin, /public", "uploads"/);
+  assert.match(plugin, /value === "cards"/);
+  assert.match(plugin, /INVALID_CONTENT_CARD/);
+  assert.match(plugin, /CONTENT_CARD_IMAGE_PATH_PATTERN/);
   assert.match(plugin, /rename\(temporaryPath, path\)/);
   assert.match(viteConfig, /contentStudio\(\)/);
   const content = JSON.parse(persistedContent);

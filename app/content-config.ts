@@ -1,6 +1,9 @@
 import type {
+  ContentCardKind,
+  ContentCardWidth,
   CoreAssetId,
   PortfolioAsset,
+  PortfolioEntry,
 } from "./portfolio-data";
 
 export type ContentLocale = "zh" | "en";
@@ -255,6 +258,9 @@ export const CONTENT_LIMITS = {
     entryMeta: 240,
     entryId: 120,
     entryImageAlt: 500,
+    links: 4,
+    linkLabel: 160,
+    linkUrl: 2_048,
   },
   media: {
     path: 2_048,
@@ -317,7 +323,33 @@ const SOCIAL_PLATFORM_SET: ReadonlySet<string> = new Set<SocialPlatform>([
 ]);
 const CUSTOM_SCENE_ASSET_BEHAVIOR_SET: ReadonlySet<string> =
   new Set<CustomSceneAssetBehavior>(["decorative", "interactive"]);
+const CONTENT_CARD_KIND_SET: ReadonlySet<string> = new Set<ContentCardKind>([
+  "text",
+  "media",
+  "links",
+]);
+const CONTENT_CARD_WIDTH_SET: ReadonlySet<string> =
+  new Set<ContentCardWidth>(["standard", "wide", "full"]);
 const DEFAULT_CUSTOM_ASSET_ACCENT = "#C99A62";
+
+export function resolveContentCardKind(
+  entry: Pick<PortfolioEntry, "kind" | "imageSrc" | "links">,
+): ContentCardKind {
+  if (entry.kind && CONTENT_CARD_KIND_SET.has(entry.kind)) {
+    return entry.kind;
+  }
+  if (entry.imageSrc) return "media";
+  if (entry.links?.length) return "links";
+  return "text";
+}
+
+export function resolveContentCardWidth(
+  entry: Pick<PortfolioEntry, "width">,
+): ContentCardWidth {
+  return entry.width && CONTENT_CARD_WIDTH_SET.has(entry.width)
+    ? entry.width
+    : "standard";
+}
 
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -368,15 +400,30 @@ const normalizeLocalizedStrings = (
   return Object.keys(result).length > 0 ? result : undefined;
 };
 
+const IMAGE_UPLOAD_PATH_PATTERN =
+  /^\/uploads\/(?:profile|photography|cards)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp|avif)$/i;
+const CONTENT_CARD_IMAGE_PATH_PATTERN =
+  /^\/uploads\/cards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp|avif)$/i;
+
 const normalizeUploadPath = (value: unknown): string | undefined => {
   const normalized = normalizeString(value, CONTENT_LIMITS.media.path);
-  return normalized &&
-    /^\/uploads\/(?:profile|photography)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp|avif)$/i.test(
-      normalized,
-    )
+  return normalized && IMAGE_UPLOAD_PATH_PATTERN.test(normalized)
     ? normalized
     : undefined;
 };
+
+const normalizeContentCardImagePath = (
+  value: unknown,
+): string | undefined => {
+  const normalized = normalizeString(value, CONTENT_LIMITS.media.path);
+  return normalized && CONTENT_CARD_IMAGE_PATH_PATTERN.test(normalized)
+    ? normalized
+    : undefined;
+};
+
+export function isValidContentCardImageSource(value: string): boolean {
+  return normalizeContentCardImagePath(value) !== undefined;
+}
 
 const normalizeModelUploadPath = (value: unknown): string | undefined => {
   const normalized = normalizeString(value, CONTENT_LIMITS.media.path);
@@ -517,6 +564,57 @@ const normalizeMetrics = (
   return result;
 };
 
+const normalizeContentCardLinkUrl = (
+  value: unknown,
+): string | undefined => {
+  const normalized = normalizeString(value, CONTENT_LIMITS.asset.linkUrl);
+  if (!normalized || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return normalized;
+    }
+    if (
+      parsed.protocol === "mailto:" &&
+      parsed.pathname.length > 0 &&
+      !/\s/.test(parsed.pathname)
+    ) {
+      return normalized;
+    }
+  } catch {
+    // Invalid and relative URLs are intentionally omitted.
+  }
+  return undefined;
+};
+
+export function isValidContentCardLinkUrl(value: string): boolean {
+  return normalizeContentCardLinkUrl(value) !== undefined;
+}
+
+const normalizeContentCardLinks = (
+  value: unknown,
+): PortfolioEntry["links"] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+
+  const result: NonNullable<PortfolioEntry["links"]> = [];
+  for (const item of value) {
+    if (result.length >= CONTENT_LIMITS.asset.links) break;
+    if (!isRecord(item)) continue;
+
+    const label = normalizeString(
+      item.label,
+      CONTENT_LIMITS.asset.linkLabel,
+    );
+    const url = normalizeContentCardLinkUrl(item.url);
+    if (!label || !url) continue;
+    result.push({ label, url });
+  }
+  return result;
+};
+
 const normalizeEntries = (
   value: unknown,
 ): PortfolioAsset["entries"] | undefined => {
@@ -551,6 +649,18 @@ const normalizeEntries = (
       body,
       meta,
     };
+    if (
+      typeof item.kind === "string" &&
+      CONTENT_CARD_KIND_SET.has(item.kind)
+    ) {
+      entry.kind = item.kind as ContentCardKind;
+    }
+    if (
+      typeof item.width === "string" &&
+      CONTENT_CARD_WIDTH_SET.has(item.width)
+    ) {
+      entry.width = item.width as ContentCardWidth;
+    }
     if (hasOwn(item, "id")) {
       const id = normalizeIdentifier(item.id, CONTENT_LIMITS.asset.entryId);
       if (id && !usedIds.has(id)) {
@@ -564,6 +674,14 @@ const normalizeEntries = (
         CONTENT_LIMITS.asset.entryImageAlt,
       );
       if (imageAlt !== undefined) entry.imageAlt = imageAlt;
+    }
+    if (hasOwn(item, "imageSrc")) {
+      const imageSrc = normalizeContentCardImagePath(item.imageSrc);
+      if (imageSrc !== undefined) entry.imageSrc = imageSrc;
+    }
+    if (hasOwn(item, "links")) {
+      const links = normalizeContentCardLinks(item.links);
+      if (links !== undefined) entry.links = links;
     }
     result.push(entry);
   }
@@ -966,6 +1084,13 @@ export function mergeProfile(
   };
 }
 
+const clonePortfolioEntry = (entry: PortfolioEntry): PortfolioEntry => ({
+  ...entry,
+  ...(entry.links
+    ? { links: entry.links.map((link) => ({ ...link })) }
+    : {}),
+});
+
 export function mergeAssets(
   baseAssets: readonly PortfolioAsset[],
   locale: ContentLocale,
@@ -978,17 +1103,16 @@ export function mergeAssets(
     const override = ASSET_ID_SET.has(asset.id)
       ? overrides?.[asset.id as CoreAssetId]
       : undefined;
-    if (!override) return asset;
 
     return {
       ...asset,
       ...override,
-      metrics: override.metrics
+      metrics: override?.metrics
         ? override.metrics.map((metric) => ({ ...metric }))
-        : asset.metrics,
-      entries: override.entries
-        ? override.entries.map((entry) => ({ ...entry }))
-        : asset.entries,
+        : asset.metrics.map((metric) => ({ ...metric })),
+      entries: override?.entries
+        ? override.entries.map(clonePortfolioEntry)
+        : asset.entries.map(clonePortfolioEntry),
     };
   });
 }
@@ -1030,7 +1154,7 @@ const cloneAssetContentOverride = (
 ): AssetContentOverride => ({
   ...override,
   metrics: override.metrics?.map((metric) => ({ ...metric })),
-  entries: override.entries?.map((entry) => ({ ...entry })),
+  entries: override.entries?.map(clonePortfolioEntry),
 });
 
 /**
@@ -1148,7 +1272,7 @@ export function mergeCustomSceneAssets(
       lastUpdated: override.lastUpdated ?? "",
       focus: deriveCustomSceneAssetFocus(asset.transform),
       metrics: override.metrics?.map((metric) => ({ ...metric })) ?? [],
-      entries: override.entries?.map((entry) => ({ ...entry })) ?? [],
+      entries: override.entries?.map(clonePortfolioEntry) ?? [],
       note: override.note ?? "",
       specialty: "default",
       related: [],

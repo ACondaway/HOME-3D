@@ -13,10 +13,12 @@ import {
 import {
   CONTENT_LIMITS,
   MAX_CONTENT_SAVE_BYTES,
+  isValidContentCardLinkUrl,
   isValidSocialUrl,
   mergeAssets,
   mergeSocialLinks,
   parseSiteContent,
+  resolveContentCardKind,
   resolvePhotographyEntryIds,
   type ContentLocale,
   type ProfileContent,
@@ -34,6 +36,7 @@ import {
   type PortfolioAsset,
 } from "./portfolio-data";
 import { PORTFOLIO_ASSETS_EN } from "./portfolio-data-en";
+import { ContentCardListEditor } from "./ContentCardEditor";
 
 export interface ContentStudioProps {
   open: boolean;
@@ -143,6 +146,8 @@ const TEXT = {
     copied: "JSON 已复制",
     invalid: "文件不是有效的内容配置",
     invalidSocial: "请先为每个社交链接填写有效地址",
+    invalidCardLinks:
+      "请先为每个内容卡按钮填写文字及有效的 http、https 或 mailto 链接",
     saveFailed: "无法写入项目，请改用导出",
     saveTooLarge: "内容超过本地保存上限，请删减长文本或内容卡片",
     identity: "身份与首屏",
@@ -223,6 +228,8 @@ const TEXT = {
     copied: "JSON copied",
     invalid: "That file is not a valid content configuration",
     invalidSocial: "Add a valid URL for every social link before saving",
+    invalidCardLinks:
+      "Add a label and valid http, https, or mailto URL for every card button",
     saveFailed: "Could not write to the project; export instead",
     saveTooLarge:
       "Content exceeds the local save limit; shorten long text or remove cards",
@@ -571,6 +578,29 @@ export function ContentStudio({
   const hasInvalidSocialLinks = editableSocialLinks.some(
     (link) => !isValidSocialUrl(link.platform, link.url),
   );
+  const hasInvalidCardLinks = [
+    ...Object.values(config.assets).flatMap((localeAssets) =>
+      Object.values(localeAssets ?? {}).flatMap(
+        (asset) => asset?.entries ?? [],
+      ),
+    ),
+    ...(config.scene?.customAssets ?? [])
+      .filter((asset) => asset.behavior === "interactive")
+      .flatMap((asset) =>
+        Object.values(asset.content).flatMap(
+          (content) => content?.entries ?? [],
+        ),
+      ),
+  ].some(
+    (entry) =>
+      resolveContentCardKind(entry) === "links" &&
+      entry.links?.some(
+        (link) =>
+          link.label.trim() === "" ||
+          link.url.trim() === "" ||
+          !isValidContentCardLinkUrl(link.url),
+      ),
+  );
   const stablePhotographyEntries =
     selectedAsset?.id === "photography"
       ? withStablePhotographyIds(selectedAsset.entries)
@@ -791,6 +821,10 @@ export function ContentStudio({
   const saveProject = async () => {
     if (hasInvalidSocialLinks) {
       setStatus(text.invalidSocial);
+      return;
+    }
+    if (hasInvalidCardLinks) {
+      setStatus(text.invalidCardLinks);
       return;
     }
 
@@ -1439,79 +1473,15 @@ export function ContentStudio({
                   </Section>
                 ) : (
                   <Section title={text.entries}>
-                    <div className="studio-repeater">
-                      {selectedAsset.entries.map((entry, index) => (
-                        <div
-                          className="studio-repeater-item is-entry"
-                          key={entry.id ?? `entry-${index}`}
-                        >
-                          <span className="studio-repeater-number">
-                            {String(index + 1).padStart(2, "0")}
-                          </span>
-                          <div className="studio-field-grid">
-                            {(
-                              ["eyebrow", "title", "body", "meta"] as const
-                            ).map((key) => (
-                              <Field
-                                key={key}
-                                label={text.fields[key]}
-                                value={entry[key]}
-                                multiline={key === "body"}
-                                wide={key === "body"}
-                                onChange={(value) => {
-                                  const entries = selectedAsset.entries.map(
-                                    (item, itemIndex) =>
-                                      itemIndex === index
-                                        ? { ...item, [key]: value }
-                                        : item,
-                                  );
-                                  updateAsset(selectedAsset.id, { entries });
-                                }}
-                              />
-                            ))}
-                          </div>
-                          <button
-                            type="button"
-                            className="studio-remove-button"
-                            onClick={() =>
-                              updateAsset(selectedAsset.id, {
-                                entries: selectedAsset.entries.filter(
-                                  (_, itemIndex) => itemIndex !== index,
-                                ),
-                              })
-                            }
-                          >
-                            {text.remove}
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        className="studio-add-button"
-                        disabled={
-                          selectedAsset.entries.length >=
-                          CONTENT_LIMITS.asset.entries
-                        }
-                        onClick={() =>
-                          updateAsset(selectedAsset.id, {
-                            entries: [
-                              ...selectedAsset.entries,
-                              {
-                                eyebrow: "NEW",
-                                title:
-                                  locale === "zh"
-                                    ? "新的内容卡片"
-                                    : "New card",
-                                body: "",
-                                meta: "",
-                              },
-                            ],
-                          })
-                        }
-                      >
-                        + {text.addEntry}
-                      </button>
-                    </div>
+                    <ContentCardListEditor
+                      key={`${locale}-${selectedAsset.id}`}
+                      locale={locale}
+                      entries={selectedAsset.entries}
+                      projectWritable={projectWritable}
+                      onChange={(entries) =>
+                        updateAsset(selectedAsset.id, { entries })
+                      }
+                    />
                   </Section>
                 )}
               </div>

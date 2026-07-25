@@ -37,6 +37,28 @@ export type AssetSpecialty =
   | "timeline"
   | "default";
 
+export type ContentCardKind = "text" | "media" | "links";
+
+export type ContentCardWidth = "standard" | "wide" | "full";
+
+export interface ContentCardLink {
+  label: string;
+  url: string;
+}
+
+export interface PortfolioEntry {
+  id?: string;
+  kind?: ContentCardKind;
+  width?: ContentCardWidth;
+  eyebrow: string;
+  title: string;
+  body: string;
+  meta: string;
+  imageSrc?: string;
+  imageAlt?: string;
+  links?: ContentCardLink[];
+}
+
 export interface PortfolioAsset {
   id: AssetId;
   number: string;
@@ -57,14 +79,7 @@ export interface PortfolioAsset {
     value: string;
     label: string;
   }>;
-  entries: Array<{
-    id?: string;
-    eyebrow: string;
-    title: string;
-    body: string;
-    meta: string;
-    imageAlt?: string;
-  }>;
+  entries: PortfolioEntry[];
   note: string;
   specialty: AssetSpecialty;
   related: AssetId[];

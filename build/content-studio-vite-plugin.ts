@@ -23,6 +23,8 @@ const MAX_GLTF_EMBEDDED_IMAGES = 16;
 const MAX_GLTF_TEXTURE_DIMENSION = 8192;
 const MAX_GLTF_TEXTURE_PIXELS = 32 * 1024 * 1024;
 const MAX_GLTF_TOTAL_TEXTURE_PIXELS = 64 * 1024 * 1024;
+const CONTENT_CARD_IMAGE_PATH_PATTERN =
+  /^\/uploads\/cards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp|avif)$/i;
 const GLB_JSON_CHUNK_TYPE = 0x4e4f534a;
 const GLB_BIN_CHUNK_TYPE = 0x004e4942;
 
@@ -35,7 +37,7 @@ const unsupportedGlbExtensions = new Set([
 ]);
 
 type JsonRecord = Record<string, unknown>;
-type UploadKind = "profile" | "photography" | "models";
+type UploadKind = "profile" | "photography" | "cards" | "models";
 
 type ImageFormat = {
   extension: "jpg" | "png" | "webp" | "avif";
@@ -226,10 +228,11 @@ async function readBody(
   return Buffer.concat(chunks, size);
 }
 
-function parseUploadKind(value: string | null): UploadKind {
+export function parseUploadKind(value: string | null): UploadKind {
   if (
     value === "profile" ||
     value === "photography" ||
+    value === "cards" ||
     value === "models"
   ) {
     return value;
@@ -238,7 +241,7 @@ function parseUploadKind(value: string | null): UploadKind {
   throw new RequestError(
     400,
     "INVALID_UPLOAD_KIND",
-    'The "kind" query parameter must be "profile", "photography", or "models".',
+    'The "kind" query parameter must be "profile", "photography", "cards", or "models".',
   );
 }
 
@@ -1412,7 +1415,129 @@ export function validateGlb(body: Buffer): void {
   validateGlbImages(document, binaryChunk, views);
 }
 
-function validateContent(value: unknown): asserts value is JsonRecord {
+function isSafeContentCardLinkUrl(value: string): boolean {
+  const normalized = value.trim();
+  if (
+    !normalized ||
+    Array.from(normalized).length > 2_048 ||
+    /[\u0000-\u001f\u007f]/.test(normalized)
+  ) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    return (
+      parsed.protocol === "http:" ||
+      parsed.protocol === "https:" ||
+      (parsed.protocol === "mailto:" &&
+        parsed.pathname.length > 0 &&
+        !/\s/.test(parsed.pathname))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validateContentCardEntries(value: unknown): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw new RequestError(
+      422,
+      "INVALID_CONTENT_CARD",
+      'Content-card "entries" must be an array.',
+    );
+  }
+  if (value.length > 24) {
+    throw new RequestError(
+      422,
+      "INVALID_CONTENT_CARD",
+      "An asset may contain at most 24 content cards.",
+    );
+  }
+
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      throw new RequestError(
+        422,
+        "INVALID_CONTENT_CARD",
+        "Every content card must be an object.",
+      );
+    }
+
+    if (
+      entry.kind !== undefined &&
+      entry.kind !== "text" &&
+      entry.kind !== "media" &&
+      entry.kind !== "links"
+    ) {
+      throw new RequestError(
+        422,
+        "INVALID_CONTENT_CARD",
+        "Content-card kind must be text, media, or links.",
+      );
+    }
+    if (
+      entry.width !== undefined &&
+      entry.width !== "standard" &&
+      entry.width !== "wide" &&
+      entry.width !== "full"
+    ) {
+      throw new RequestError(
+        422,
+        "INVALID_CONTENT_CARD",
+        "Content-card width must be standard, wide, or full.",
+      );
+    }
+    if (
+      entry.imageSrc !== undefined &&
+      (typeof entry.imageSrc !== "string" ||
+        !CONTENT_CARD_IMAGE_PATH_PATTERN.test(entry.imageSrc))
+    ) {
+      throw new RequestError(
+        422,
+        "INVALID_CONTENT_CARD",
+        "Content-card images must use a local /uploads/cards path.",
+      );
+    }
+    if (entry.links === undefined) continue;
+    if (!Array.isArray(entry.links) || entry.links.length > 4) {
+      throw new RequestError(
+        422,
+        "INVALID_CONTENT_CARD",
+        "A content card may contain at most four links.",
+      );
+    }
+
+    for (const link of entry.links) {
+      if (
+        !isRecord(link) ||
+        typeof link.label !== "string" ||
+        !link.label.trim() ||
+        Array.from(link.label.trim()).length > 160 ||
+        typeof link.url !== "string" ||
+        !isSafeContentCardLinkUrl(link.url)
+      ) {
+        throw new RequestError(
+          422,
+          "INVALID_CONTENT_CARD",
+          "Every content-card link needs a label and a safe URL.",
+        );
+      }
+    }
+  }
+}
+
+function validateAssetContentCards(value: unknown): void {
+  if (!isRecord(value)) return;
+  for (const asset of Object.values(value)) {
+    if (isRecord(asset)) validateContentCardEntries(asset.entries);
+  }
+}
+
+export function validateContent(
+  value: unknown,
+): asserts value is JsonRecord {
   if (!isRecord(value)) {
     throw new RequestError(
       422,
@@ -1435,6 +1560,21 @@ function validateContent(value: unknown): asserts value is JsonRecord {
       "INVALID_CONTENT",
       'The "profile" and "assets" properties must be objects.',
     );
+  }
+
+  for (const localeAssets of Object.values(value.assets)) {
+    validateAssetContentCards(localeAssets);
+  }
+
+  if (isRecord(value.scene) && Array.isArray(value.scene.customAssets)) {
+    for (const asset of value.scene.customAssets) {
+      if (!isRecord(asset) || !isRecord(asset.content)) continue;
+      for (const localizedContent of Object.values(asset.content)) {
+        if (isRecord(localizedContent)) {
+          validateContentCardEntries(localizedContent.entries);
+        }
+      }
+    }
   }
 }
 

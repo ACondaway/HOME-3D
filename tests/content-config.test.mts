@@ -4,19 +4,24 @@ import test from "node:test";
 const contentConfig = (await import(
   new URL("../app/content-config.ts", import.meta.url).href
 )) as typeof import("../app/content-config");
-const { isAssetId } = (await import(
+const { isAssetId, PORTFOLIO_ASSETS } = (await import(
   new URL("../app/portfolio-data.ts", import.meta.url).href
 )) as typeof import("../app/portfolio-data");
 
 const {
   DEFAULT_SCENE_TRANSFORM,
+  isValidContentCardImageSource,
+  isValidContentCardLinkUrl,
   isValidSocialUrl,
+  mergeAssets,
   mergeCustomSceneAssets,
   mergeMedia,
   mergeSceneConfig,
   mergeSocialLinks,
   normalizeSiteContent,
   parseSiteContent,
+  resolveContentCardKind,
+  resolveContentCardWidth,
   resolvePhotographyEntryId,
   resolvePhotographyEntryIds,
 } = contentConfig;
@@ -27,6 +32,8 @@ const photographyPath =
   "/uploads/photography/22222222-2222-4222-8222-222222222222.jpg";
 const modelPath =
   "/uploads/models/33333333-3333-4333-8333-333333333333.glb";
+const cardImagePath =
+  "/uploads/cards/44444444-4444-4444-8444-444444444444.avif";
 
 const emptyDocument = {
   version: 1 as const,
@@ -235,6 +242,210 @@ test("normalizes photography ids into unique ARIA-safe identifiers", () => {
     "same-id",
     "temporary-tables",
   ]);
+});
+
+test("keeps legacy content cards unchanged and resolves compatible defaults", () => {
+  const legacyEntry = {
+    eyebrow: "ARCHIVE",
+    title: "旧版卡片",
+    body: "没有布局字段的 version-one 内容。",
+    meta: "2026",
+  };
+  const normalized = normalizeSiteContent({
+    ...emptyDocument,
+    assets: {
+      zh: {
+        music: {
+          entries: [legacyEntry],
+        },
+      },
+    },
+  });
+  const [entry] = normalized.assets.zh?.music?.entries ?? [];
+
+  assert.deepEqual(entry, legacyEntry);
+  assert.equal(entry && resolveContentCardKind(entry), "text");
+  assert.equal(entry && resolveContentCardWidth(entry), "standard");
+});
+
+test("normalizes all content-card kinds, widths, and local card images", () => {
+  const normalized = normalizeSiteContent({
+    ...emptyDocument,
+    assets: {
+      zh: {
+        music: {
+          entries: [
+            {
+              kind: "text",
+              width: "standard",
+              eyebrow: "TEXT",
+              title: "纯文字",
+              body: "正文",
+              meta: "One",
+            },
+            {
+              kind: "media",
+              width: "wide",
+              imageSrc: cardImagePath,
+              imageAlt: " 一张安全上传的卡片图片 ",
+              eyebrow: "MEDIA",
+              title: "图文",
+              body: "正文",
+              meta: "Two",
+            },
+            {
+              kind: "links",
+              width: "full",
+              eyebrow: "LINKS",
+              title: "链接",
+              body: "正文",
+              meta: "Three",
+              links: [
+                { label: " Website ", url: "https://example.com/work" },
+              ],
+            },
+            {
+              kind: "unknown",
+              width: "oversized",
+              imageSrc: "https://example.com/tracker.jpg",
+              eyebrow: "INVALID",
+              title: "非法字段",
+              body: "正文",
+              meta: "Four",
+            },
+          ],
+        },
+      },
+    },
+  });
+  const entries = normalized.assets.zh?.music?.entries ?? [];
+
+  assert.deepEqual(
+    entries.slice(0, 3).map(({ kind, width }) => ({ kind, width })),
+    [
+      { kind: "text", width: "standard" },
+      { kind: "media", width: "wide" },
+      { kind: "links", width: "full" },
+    ],
+  );
+  assert.equal(entries[1]?.imageSrc, cardImagePath);
+  assert.equal(entries[1]?.imageAlt, "一张安全上传的卡片图片");
+  assert.equal(entries[3]?.kind, undefined);
+  assert.equal(entries[3]?.width, undefined);
+  assert.equal(entries[3]?.imageSrc, undefined);
+  assert.equal(isValidContentCardImageSource(cardImagePath), true);
+  assert.equal(isValidContentCardImageSource(profilePhotoPath), false);
+  assert.equal(
+    isValidContentCardImageSource("https://example.com/tracker.jpg"),
+    false,
+  );
+  assert.equal(resolveContentCardKind(entries[1]!), "media");
+  assert.equal(resolveContentCardKind(entries[2]!), "links");
+  assert.equal(resolveContentCardKind({ imageSrc: cardImagePath }), "media");
+  assert.equal(
+    resolveContentCardKind({
+      links: [{ label: "Mail", url: "mailto:hello@example.com" }],
+    }),
+    "links",
+  );
+});
+
+test("keeps at most four safe content-card links", () => {
+  const normalized = normalizeSiteContent({
+    ...emptyDocument,
+    assets: {
+      en: {
+        contact: {
+          entries: [
+            {
+              eyebrow: "CONTACT",
+              title: "Find me",
+              body: "",
+              meta: "",
+              links: [
+                { label: " ", url: "https://empty-label.example" },
+                { label: "Script", url: "javascript:alert(1)" },
+                { label: "Relative", url: "/contact" },
+                { label: "Website", url: "https://example.com" },
+                { label: "HTTP", url: "http://example.net" },
+                { label: "Email", url: "mailto:hello@example.com" },
+                { label: "Fourth", url: "https://example.org/fourth" },
+                { label: "Overflow", url: "https://example.org/fifth" },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  });
+  const links = normalized.assets.en?.contact?.entries?.[0]?.links;
+
+  assert.deepEqual(links, [
+    { label: "Website", url: "https://example.com" },
+    { label: "HTTP", url: "http://example.net" },
+    { label: "Email", url: "mailto:hello@example.com" },
+    { label: "Fourth", url: "https://example.org/fourth" },
+  ]);
+  assert.equal(isValidContentCardLinkUrl("https://example.com"), true);
+  assert.equal(
+    isValidContentCardLinkUrl("mailto:hello@example.com"),
+    true,
+  );
+  assert.equal(isValidContentCardLinkUrl("javascript:alert(1)"), false);
+  assert.equal(isValidContentCardLinkUrl("data:text/plain,hello"), false);
+});
+
+test("deep-clones content-card links through asset and scene merges", () => {
+  const entry = {
+    eyebrow: "LINKS",
+    title: "Useful links",
+    body: "",
+    meta: "",
+    links: [{ label: "Original", url: "https://example.com" }],
+  };
+  const config = normalizeSiteContent({
+    ...emptyDocument,
+    assets: {
+      en: {
+        music: {
+          entries: [entry],
+        },
+      },
+    },
+    scene: {
+      customAssets: [
+        {
+          id: "custom-links",
+          behavior: "interactive",
+          accent: "#456789",
+          transform: DEFAULT_SCENE_TRANSFORM,
+          content: {
+            en: {
+              entries: [entry],
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  const mergedCore = mergeAssets(PORTFOLIO_ASSETS, "en", config);
+  const detachedScene = mergeSceneConfig(config);
+  const [mergedCustom] = mergeCustomSceneAssets("en", config);
+  mergedCore[0]!.entries[0]!.links![0]!.label = "Changed core";
+  detachedScene.customAssets![0]!.content.en!.entries![0]!.links![0]!.label =
+    "Changed scene";
+  mergedCustom!.entries[0]!.links![0]!.label = "Changed custom";
+
+  assert.equal(
+    config.assets.en?.music?.entries?.[0]?.links?.[0]?.label,
+    "Original",
+  );
+  assert.equal(
+    config.scene?.customAssets?.[0]?.content.en?.entries?.[0]?.links?.[0]
+      ?.label,
+    "Original",
+  );
 });
 
 test("keeps version-one scene data compatible through parse and merge", () => {

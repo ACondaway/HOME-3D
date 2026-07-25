@@ -20,6 +20,7 @@ import {
   type AssetId,
   type CoreAssetId,
   type PortfolioAsset,
+  type PortfolioEntry,
 } from "./portfolio-data";
 import {
   CATEGORY_ORDER_EN,
@@ -34,6 +35,10 @@ import {
   mergeSceneConfig,
   mergeSocialLinks,
   parseSiteContent,
+  isValidContentCardImageSource,
+  isValidContentCardLinkUrl,
+  resolveContentCardKind,
+  resolveContentCardWidth,
   type CustomSceneAsset,
   type ContentLocale,
   type ProfileContent,
@@ -2427,6 +2432,101 @@ function SpecialtyModule({
   );
 }
 
+function resolveSafeContentImageSource(
+  imageSrc: string | undefined,
+): string | null {
+  const source = imageSrc?.trim();
+  return source && isValidContentCardImageSource(source) ? source : null;
+}
+
+function ContentCardImage({
+  src,
+  alt,
+}: {
+  src: string;
+  alt: string;
+}) {
+  const [failedSource, setFailedSource] = useState<string>();
+  if (failedSource === src) return null;
+
+  return (
+    <div className="entry-card-media">
+      {/* Uploaded images are runtime paths and cannot be statically imported. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailedSource(src)}
+      />
+    </div>
+  );
+}
+
+function ContentCard({
+  entry,
+  index,
+}: {
+  entry: PortfolioEntry;
+  index: number;
+}) {
+  const kind = resolveContentCardKind(entry);
+  const width = resolveContentCardWidth(entry);
+  const imageSrc = resolveSafeContentImageSource(entry.imageSrc);
+  const links = (entry.links ?? [])
+    .flatMap((link) => {
+      const label = link.label.trim();
+      const href = link.url.trim();
+      if (!label || !isValidContentCardLinkUrl(href)) return [];
+
+      const protocol = new URL(href).protocol;
+      return [{
+        href,
+        label,
+        opensNewTab: protocol === "http:" || protocol === "https:",
+      }];
+    })
+    .slice(0, 4);
+
+  return (
+    <article
+      className={`entry-card entry-card--${kind} entry-card--${width}`}
+    >
+      <div className="entry-number">
+        {String(index + 1).padStart(2, "0")}
+      </div>
+      {entry.eyebrow.trim() && <p>{entry.eyebrow}</p>}
+      <h3>{entry.title}</h3>
+      {kind === "media" && imageSrc && (
+        <ContentCardImage
+          src={imageSrc}
+          alt={entry.imageAlt?.trim() || entry.title}
+        />
+      )}
+      {entry.body.trim() && (
+        <div className="entry-card-body">{entry.body}</div>
+      )}
+      {kind === "links" && links.length > 0 && (
+        <div className="entry-card-links">
+          {links.map((link, linkIndex) => (
+            <a
+              className="entry-card-link"
+              href={link.href}
+              key={`${link.href}-${linkIndex}`}
+              rel="noopener noreferrer"
+              target={link.opensNewTab ? "_blank" : undefined}
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      )}
+      {entry.meta.trim() && <span>{entry.meta}</span>}
+    </article>
+  );
+}
+
 function DetailPanel({
   asset,
   assetById,
@@ -2561,15 +2661,11 @@ function DetailPanel({
           {asset.id !== "photography" && asset.entries.length > 0 && (
             <div className="entry-grid">
               {asset.entries.map((entry, index) => (
-                <article className="entry-card" key={entry.id ?? entry.title}>
-                  <div className="entry-number">
-                    {String(index + 1).padStart(2, "0")}
-                  </div>
-                  <p>{entry.eyebrow}</p>
-                  <h3>{entry.title}</h3>
-                  <div>{entry.body}</div>
-                  <span>{entry.meta}</span>
-                </article>
+                <ContentCard
+                  entry={entry}
+                  index={index}
+                  key={entry.id ?? `${entry.title}-${index}`}
+                />
               ))}
             </div>
           )}

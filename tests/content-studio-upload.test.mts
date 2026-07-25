@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { validateGlb } = (await import(
+const { parseUploadKind, validateContent, validateGlb } = (await import(
   new URL("../build/content-studio-vite-plugin.ts", import.meta.url).href
 )) as typeof import("../build/content-studio-vite-plugin");
 
@@ -9,6 +9,79 @@ type GlbDocument = Record<string, unknown>;
 
 const JSON_CHUNK_TYPE = 0x4e4f534a;
 const BIN_CHUNK_TYPE = 0x004e4942;
+
+test("accepts card uploads and rejects unsafe card content on save", () => {
+  assert.equal(parseUploadKind("cards"), "cards");
+  for (const entry of [
+    {
+      eyebrow: "IMAGE",
+      title: "Remote tracker",
+      body: "",
+      meta: "",
+      imageSrc: "https://example.com/tracker.jpg",
+    },
+    {
+      eyebrow: "LINK",
+      title: "Unsafe link",
+      body: "",
+      meta: "",
+      links: [{ label: "Run", url: "javascript:alert(1)" }],
+    },
+  ]) {
+    assert.throws(
+      () =>
+        validateContent({
+          version: 1,
+          profile: {},
+          assets: {
+            en: {
+              contact: {
+                entries: [entry],
+              },
+            },
+          },
+        }),
+      (error: unknown) => {
+        assert.equal(
+          typeof error === "object" && error !== null && "code" in error
+            ? error.code
+            : undefined,
+          "INVALID_CONTENT_CARD",
+        );
+        return true;
+      },
+    );
+  }
+
+  assert.doesNotThrow(() =>
+    validateContent({
+      version: 1,
+      profile: {},
+      assets: {
+        en: {
+          contact: {
+            entries: [
+              {
+                eyebrow: "LINK",
+                title: "Safe card",
+                body: "",
+                meta: "",
+                imageSrc:
+                  "/uploads/cards/44444444-4444-4444-8444-444444444444.webp",
+                links: [
+                  {
+                    label: "😀".repeat(100),
+                    url: "https://example.com",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    }),
+  );
+});
 
 function paddedBuffer(value: Buffer, paddingByte: number): Buffer {
   const paddedLength = Math.ceil(value.byteLength / 4) * 4;

@@ -27,6 +27,7 @@ import {
   type CoreAssetId,
   type PortfolioAsset,
 } from "./portfolio-data";
+import { ContentCardListEditor } from "./ContentCardEditor";
 
 interface SceneStudioProps {
   locale: ContentLocale;
@@ -883,77 +884,17 @@ export function SceneStudio({
               </StudioSection>
 
               <StudioSection title={copy.entries}>
-                <div className="studio-repeater">
-                  {customEntries.map((entry, index) => (
-                    <div
-                      className="studio-repeater-item is-entry"
-                      key={entry.id ?? `custom-entry-${index}`}
-                    >
-                      <span className="studio-repeater-number">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <div className="studio-field-grid">
-                        {(
-                          ["eyebrow", "title", "body", "meta"] as const
-                        ).map((key) => (
-                          <TextField
-                            key={key}
-                            label={copy.fields[key]}
-                            value={entry[key]}
-                            multiline={key === "body"}
-                            wide={key === "body"}
-                            onChange={(value) =>
-                              updateCustomContent(selectedCustomAsset.id, {
-                                entries: customEntries.map(
-                                  (item, itemIndex) =>
-                                    itemIndex === index
-                                      ? { ...item, [key]: value }
-                                      : item,
-                                ),
-                              })
-                            }
-                          />
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        className="studio-remove-button"
-                        onClick={() =>
-                          updateCustomContent(selectedCustomAsset.id, {
-                            entries: customEntries.filter(
-                              (_, itemIndex) => itemIndex !== index,
-                            ),
-                          })
-                        }
-                      >
-                        {copy.removeItem}
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="studio-add-button"
-                    disabled={
-                      customEntries.length >= CONTENT_LIMITS.asset.entries
-                    }
-                    onClick={() =>
-                      updateCustomContent(selectedCustomAsset.id, {
-                        entries: [
-                          ...customEntries,
-                          {
-                            eyebrow: "NEW",
-                            title:
-                              locale === "zh" ? "新的内容卡片" : "New card",
-                            body: "",
-                            meta: "",
-                          },
-                        ],
-                      })
-                    }
-                  >
-                    + {copy.addEntry}
-                  </button>
-                </div>
+                <ContentCardListEditor
+                  key={`${locale}-${selectedCustomAsset.id}`}
+                  locale={locale}
+                  entries={customEntries}
+                  projectWritable={projectWritable}
+                  onChange={(entries) =>
+                    updateCustomContent(selectedCustomAsset.id, {
+                      entries,
+                    })
+                  }
+                />
               </StudioSection>
             </>
           )}

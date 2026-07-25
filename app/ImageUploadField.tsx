@@ -43,7 +43,7 @@ async function decodeImageDimensions(
 
 interface ImageUploadFieldProps {
   locale: ContentLocale;
-  kind: "profile" | "photography";
+  kind: "profile" | "photography" | "cards";
   label: string;
   description: string;
   value?: string;
@@ -75,9 +75,15 @@ export function ImageUploadField({
   const copy =
     locale === "zh"
       ? {
-          choose: value ? "替换照片" : "选择照片",
+          choose: value
+            ? kind === "cards"
+              ? "替换图片"
+              : "替换照片"
+            : kind === "cards"
+              ? "选择图片"
+              : "选择照片",
           clear: "清除",
-          drop: "拖动照片到这里",
+          drop: kind === "cards" ? "拖动图片到这里" : "拖动照片到这里",
           formats: "JPEG、PNG、WebP 或 AVIF，最大 10 MB",
           uploading: "正在上传…",
           uploaded: "已上传，请保存到项目",
@@ -87,9 +93,15 @@ export function ImageUploadField({
           localOnly: "请在本地 Content Studio 中上传",
         }
       : {
-          choose: value ? "Replace photo" : "Choose photo",
+          choose: value
+            ? kind === "cards"
+              ? "Replace image"
+              : "Replace photo"
+            : kind === "cards"
+              ? "Choose image"
+              : "Choose photo",
           clear: "Clear",
-          drop: "Drop a photo here",
+          drop: kind === "cards" ? "Drop an image here" : "Drop a photo here",
           formats: "JPEG, PNG, WebP, or AVIF · 10 MB max",
           uploading: "Uploading…",
           uploaded: "Uploaded — save to project",
