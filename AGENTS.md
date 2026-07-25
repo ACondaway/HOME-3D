@@ -4,6 +4,7 @@ This repository is designed to be customized with a coding agent. Read the small
 
 - Content, profile, social links, photography, Spotlight, or cards: [`$living-index-content`](./skills/living-index-content/SKILL.md)
 - Timezone lighting, object placement, GLB imports, or decorative/interactive scene assets: [`$living-index-scene`](./skills/living-index-scene/SKILL.md)
+- Simple procedural furniture, props, lights, signs, or geometric decorations generated directly with Three.js: [`$living-index-native-assets`](./skills/living-index-native-assets/SKILL.md)
 - New framework capabilities, interactions, modules, routes, tests, or release-ready changes: [`$living-index-developer`](./skills/living-index-developer/SKILL.md)
 
 ## Repository map

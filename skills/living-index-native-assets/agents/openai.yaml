@@ -1,0 +1,4 @@
+interface:
+  display_name: "Living Index Native Assets"
+  short_description: "Build lightweight procedural Three.js room assets"
+  default_prompt: "Use $living-index-native-assets to create a lightweight procedural room asset that matches the current scene."

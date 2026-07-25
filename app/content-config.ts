@@ -137,6 +137,8 @@ export interface CustomSceneAsset {
 
 export interface SceneConfig {
   placements?: Partial<Record<CoreAssetId, ScenePlacement>>;
+  disabledCoreAssets?: CoreAssetId[];
+  coreAssetModels?: Partial<Record<CoreAssetId, string>>;
   customAssets?: CustomSceneAsset[];
 }
 
@@ -956,6 +958,26 @@ const normalizeScene = (value: unknown): SceneConfig | undefined => {
   if (!isRecord(value)) return undefined;
 
   const result: SceneConfig = {};
+  if (Array.isArray(value.disabledCoreAssets)) {
+    const disabledIds = new Set(value.disabledCoreAssets);
+    result.disabledCoreAssets = CONTENT_ASSET_IDS.filter((assetId) =>
+      disabledIds.has(assetId),
+    );
+  }
+
+  if (isRecord(value.coreAssetModels)) {
+    const coreAssetModels: NonNullable<SceneConfig["coreAssetModels"]> = {};
+    for (const assetId of CONTENT_ASSET_IDS) {
+      const modelSrc = normalizeModelUploadPath(
+        value.coreAssetModels[assetId],
+      );
+      if (modelSrc) coreAssetModels[assetId] = modelSrc;
+    }
+    if (Object.keys(coreAssetModels).length > 0) {
+      result.coreAssetModels = coreAssetModels;
+    }
+  }
+
   if (isRecord(value.placements)) {
     const placements: NonNullable<SceneConfig["placements"]> = {};
     for (const assetId of CONTENT_ASSET_IDS) {
@@ -1168,6 +1190,13 @@ export function mergeSceneConfig(
   if (!scene) return {};
 
   const result: SceneConfig = {};
+  if (scene.disabledCoreAssets) {
+    result.disabledCoreAssets = [...scene.disabledCoreAssets];
+  }
+  if (scene.coreAssetModels) {
+    result.coreAssetModels = { ...scene.coreAssetModels };
+  }
+
   if (scene.placements) {
     const placements: NonNullable<SceneConfig["placements"]> = {};
     for (const [assetId, placement] of Object.entries(scene.placements)) {
@@ -1206,6 +1235,13 @@ export function mergeSceneConfig(
     });
   }
   return result;
+}
+
+export function isCoreSceneAssetEnabled(
+  scene: SceneConfig | undefined,
+  assetId: CoreAssetId,
+): boolean {
+  return !scene?.disabledCoreAssets?.includes(assetId);
 }
 
 export function deriveCustomSceneAssetFocus(

@@ -10,9 +10,11 @@ import {
   useState,
 } from "react";
 import {
+  CONTENT_ASSET_IDS,
   CONTENT_LIMITS,
   DEFAULT_SCENE_TRANSFORM,
   SCENE_TRANSFORM_LIMITS,
+  isCoreSceneAssetEnabled,
   type AssetContentOverride,
   type ContentLocale,
   type CustomSceneAsset,
@@ -22,6 +24,7 @@ import {
   type SiteContentConfig,
 } from "./content-config";
 import { ModelUploadField } from "./ModelUploadField";
+import type { CustomModelLoadState } from "./model-loading";
 import {
   isAssetId,
   type CoreAssetId,
@@ -38,6 +41,7 @@ interface SceneStudioProps {
   config: SiteContentConfig;
   assets: PortfolioAsset[];
   projectWritable: boolean;
+  modelLoadStates: Readonly<Record<string, CustomModelLoadState>>;
   placementEdit: ScenePlacementEdit | null;
   onChange: Dispatch<SetStateAction<SiteContentConfig>>;
   onPlacementEditStart: (assetId: string) => void;
@@ -47,6 +51,7 @@ interface SceneStudioProps {
 }
 
 type TransformKey = keyof SceneTransform;
+type CorePortfolioAsset = PortfolioAsset & { id: CoreAssetId };
 type AssetTextKey =
   | "objectLabel"
   | "sectionTitle"
@@ -75,6 +80,12 @@ const ASSET_TEXT_KEYS = [
 ] as const satisfies readonly AssetTextKey[];
 
 const DEFAULT_ACCENT = "#c99a62";
+
+function isCorePortfolioAsset(
+  asset: PortfolioAsset,
+): asset is CorePortfolioAsset {
+  return isAssetId(asset.id);
+}
 
 function createCustomAssetId(): CustomSceneAsset["id"] {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -323,6 +334,7 @@ export function SceneStudio({
   config,
   assets,
   projectWritable,
+  modelLoadStates,
   placementEdit,
   onChange,
   onPlacementEditStart,
@@ -335,9 +347,10 @@ export function SceneStudio({
       ? {
           title: "场景布局",
           description:
-            "移动现有物件，或上传 GLB 新资产。修改会实时应用；关闭工作台即可检查完整房间。",
+            "启用、停用或移动内置物件，也可以上传 GLB 新资产。停用不会删除物件定义或已经保存的内容。",
           selectAsset: "选择要编辑的场景物件",
-          existing: "现有物件",
+          existing: "内置物件 · 已启用",
+          inactive: "内置物件 · 已停用",
           custom: "自定义资产",
           add: "添加新资产",
           limit: "已达到自定义资产上限",
@@ -367,6 +380,15 @@ export function SceneStudio({
           cancelPlacement: "取消全部预览",
           placementCoordinates: "预览坐标",
           reset: "恢复原始位置",
+          disableCore: "停用物件",
+          enableCore: "重新激活",
+          disabledCoreHelp:
+            "这个内置物件不会出现在场景、内容索引或详情入口中；代码定义、页面内容和摆放数据仍然保留。",
+          disabledPlacementHelp:
+            "重新激活物件后即可继续拖动或编辑坐标。",
+          replacement: "替换内置模型",
+          replacementHelp:
+            "上传 GLB 只会替换场景中的外观；原来的物件 ID、双语内容、交互和摆放数据都会保留。解除模型引用即可恢复代码内置外观。",
           model: "3D 模型",
           modelHelp:
             "上传自有 GLB 模型。没有模型或加载失败时，场景会显示一个占位物。",
@@ -409,9 +431,10 @@ export function SceneStudio({
       : {
           title: "Scene layout",
           description:
-            "Move existing objects or upload new GLB assets. Changes apply live; close the Studio to inspect the full room.",
+            "Enable, disable, or move built-in objects, and upload new GLB assets. Disabling keeps the object definition and saved content intact.",
           selectAsset: "Choose a scene object to edit",
-          existing: "Existing object",
+          existing: "Built-in · active",
+          inactive: "Built-in · inactive",
           custom: "Custom asset",
           add: "Add new asset",
           limit: "Custom asset limit reached",
@@ -442,6 +465,15 @@ export function SceneStudio({
           cancelPlacement: "Cancel all previews",
           placementCoordinates: "Preview coordinates",
           reset: "Restore original placement",
+          disableCore: "Disable object",
+          enableCore: "Reactivate",
+          disabledCoreHelp:
+            "This built-in object is absent from the room, content index, and detail routes. Its code definition, page content, and placement remain saved.",
+          disabledPlacementHelp:
+            "Reactivate the object to continue dragging it or editing its coordinates.",
+          replacement: "Replace built-in model",
+          replacementHelp:
+            "Uploading a GLB changes only the room appearance. The original ID, bilingual content, interaction, and placement remain intact; unlink it to restore the code-native object.",
           model: "3D model",
           modelHelp:
             "Upload your own GLB model. A placeholder remains visible when no model is attached or loading fails.",
@@ -484,19 +516,32 @@ export function SceneStudio({
         };
 
   const coreAssets = useMemo(
-    () => assets.filter((asset) => isAssetId(asset.id)),
+    () => assets.filter(isCorePortfolioAsset),
     [assets],
   );
   const customAssets = useMemo(
     () => config.scene?.customAssets ?? [],
     [config.scene?.customAssets],
   );
-  const allIds = useMemo(
+  const disabledCoreAssetIds = useMemo(
+    () => new Set(config.scene?.disabledCoreAssets ?? []),
+    [config.scene?.disabledCoreAssets],
+  );
+  const allIds = useMemo<string[]>(
     () => [
       ...coreAssets.map((asset) => asset.id),
       ...customAssets.map((asset) => asset.id),
     ],
     [coreAssets, customAssets],
+  );
+  const placeableIds = useMemo<string[]>(
+    () => [
+      ...coreAssets
+        .filter((asset) => !disabledCoreAssetIds.has(asset.id))
+        .map((asset) => asset.id),
+      ...customAssets.map((asset) => asset.id),
+    ],
+    [coreAssets, customAssets, disabledCoreAssetIds],
   );
   const [selectedId, setSelectedId] = useState<string>(
     () => allIds[0] ?? "music",
@@ -519,6 +564,9 @@ export function SceneStudio({
     selectedCoreAsset && isAssetId(selectedCoreAsset.id)
       ? selectedCoreAsset.id
       : undefined;
+  const selectedCoreEnabled = selectedCoreId
+    ? isCoreSceneAssetEnabled(config.scene, selectedCoreId)
+    : false;
   const selectedCustomAsset = customAssets.find(
     (asset) => asset.id === effectiveSelectedId,
   );
@@ -530,10 +578,10 @@ export function SceneStudio({
   }, [pendingRemovalId]);
 
   useEffect(() => {
-    if (placementEdit && !allIds.includes(placementEdit.assetId)) {
+    if (placementEdit && !placeableIds.includes(placementEdit.assetId)) {
       onPlacementEditCancel();
     }
-  }, [allIds, onPlacementEditCancel, placementEdit]);
+  }, [onPlacementEditCancel, placeableIds, placementEdit]);
 
   useEffect(() => {
     const previousPlacementId = previousPlacementIdRef.current;
@@ -602,6 +650,50 @@ export function SceneStudio({
     });
   };
 
+  const setCoreAssetEnabled = (id: CoreAssetId, enabled: boolean) => {
+    if (!enabled && placementEdit?.assetId === id) {
+      onPlacementEditCancel();
+    }
+    onChange((current) => {
+      const disabledIds = new Set(
+        current.scene?.disabledCoreAssets ?? [],
+      );
+      if (enabled) disabledIds.delete(id);
+      else disabledIds.add(id);
+
+      return {
+        ...current,
+        scene: {
+          ...current.scene,
+          disabledCoreAssets: CONTENT_ASSET_IDS.filter((assetId) =>
+            disabledIds.has(assetId),
+          ),
+        },
+      };
+    });
+  };
+
+  const updateCoreAssetModel = (
+    id: CoreAssetId,
+    modelSrc: string | undefined,
+  ) => {
+    onChange((current) => {
+      const coreAssetModels = {
+        ...current.scene?.coreAssetModels,
+      };
+      if (modelSrc) coreAssetModels[id] = modelSrc;
+      else delete coreAssetModels[id];
+
+      return {
+        ...current,
+        scene: {
+          ...current.scene,
+          coreAssetModels,
+        },
+      };
+    });
+  };
+
   const updateCustomAsset = (
     id: CustomSceneAsset["id"],
     updater: (asset: CustomSceneAsset) => CustomSceneAsset,
@@ -648,6 +740,9 @@ export function SceneStudio({
 
   const corePlacement: ScenePlacement | undefined = selectedCoreId
     ? config.scene?.placements?.[selectedCoreId]
+    : undefined;
+  const coreModelSrc = selectedCoreId
+    ? config.scene?.coreAssetModels?.[selectedCoreId]
     : undefined;
   const coreTransform: SceneTransform = {
     position: cloneVector(
@@ -700,18 +795,33 @@ export function SceneStudio({
     }));
   };
 
-  const renderPlacementToolbar = (assetId: string) => {
-    const active = placementEdit?.assetId === assetId;
+  const renderPlacementToolbar = (
+    assetId: string,
+    disabled = false,
+  ) => {
+    const active = !disabled && placementEdit?.assetId === assetId;
     return (
       <div
-        className={`studio-placement-toolbar ${active ? "is-active" : ""}`}
+        className={`studio-placement-toolbar ${
+          active ? "is-active" : ""
+        } ${disabled ? "is-disabled" : ""}`}
       >
-        <div className="studio-placement-status">
+        <div
+          className="studio-placement-status"
+          role="status"
+          aria-live="polite"
+        >
           <strong>
-            {active ? copy.dragPlacementActive : copy.dragPlacement}
+            {disabled
+              ? copy.inactive
+              : active
+                ? copy.dragPlacementActive
+                : copy.dragPlacement}
           </strong>
           <p>
-            {active
+            {disabled
+              ? copy.disabledPlacementHelp
+              : active
               ? copy.dragModes[placementEdit.mode].help
               : copy.dragPlacementHelp}
           </p>
@@ -795,6 +905,7 @@ export function SceneStudio({
               ref={placementStartRef}
               type="button"
               className="studio-placement-start"
+              disabled={disabled}
               onClick={() => onPlacementEditStart(assetId)}
             >
               {copy.dragPlacement}
@@ -833,27 +944,31 @@ export function SceneStudio({
           role="group"
           aria-label={copy.selectAsset}
         >
-          {coreAssets.map((asset) => (
-            <button
-              type="button"
-              aria-pressed={effectiveSelectedId === asset.id}
-              className={[
-                effectiveSelectedId === asset.id ? "is-active" : "",
-                placementEdit?.assetId === asset.id
-                  ? "is-placement-target"
-                  : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              key={asset.id}
-              onClick={() => selectAsset(asset.id)}
-            >
-              <span>{asset.number}</span>
-              <strong>{asset.objectLabel}</strong>
-              <small>{copy.existing}</small>
-              <i style={{ background: asset.accent }} aria-hidden="true" />
-            </button>
-          ))}
+          {coreAssets.map((asset) => {
+            const enabled = !disabledCoreAssetIds.has(asset.id);
+            return (
+              <button
+                type="button"
+                aria-pressed={effectiveSelectedId === asset.id}
+                className={[
+                  effectiveSelectedId === asset.id ? "is-active" : "",
+                  placementEdit?.assetId === asset.id
+                    ? "is-placement-target"
+                    : "",
+                  enabled ? "" : "is-inactive",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                key={asset.id}
+                onClick={() => selectAsset(asset.id)}
+              >
+                <span>{asset.number}</span>
+                <strong>{asset.objectLabel}</strong>
+                <small>{enabled ? copy.existing : copy.inactive}</small>
+                <i style={{ background: asset.accent }} aria-hidden="true" />
+              </button>
+            );
+          })}
           {customAssets.map((asset, index) => (
             <button
               type="button"
@@ -899,30 +1014,84 @@ export function SceneStudio({
       </StudioSection>
 
       {selectedCoreAsset && selectedCoreId && (
-        <StudioSection
-          title={`${selectedCoreAsset.objectLabel} · ${copy.placement}`}
-          description={copy.placementHelp}
-          actions={
-            <button
-              type="button"
-              className="studio-remove-button"
-              onClick={() => resetCorePlacement(selectedCoreId)}
-            >
-              {copy.reset}
-            </button>
-          }
-        >
-          {renderPlacementToolbar(selectedCoreId)}
-          <TransformEditor
-            transform={coreTransform}
-            relative
-            locale={locale}
-            disabled={placementIsActive}
-            onChange={(key, value) =>
-              updateCorePlacement(selectedCoreId, key, value)
+        <>
+          <StudioSection
+            title={`${selectedCoreAsset.objectLabel} · ${copy.placement}`}
+            description={
+              selectedCoreEnabled
+                ? copy.placementHelp
+                : copy.disabledCoreHelp
             }
-          />
-        </StudioSection>
+            actions={
+              <div className="studio-section-actions">
+                <button
+                  type="button"
+                  className="studio-reset-button"
+                  onClick={() => resetCorePlacement(selectedCoreId)}
+                >
+                  {copy.reset}
+                </button>
+                <button
+                  type="button"
+                  className={`studio-core-visibility-button ${
+                    selectedCoreEnabled ? "is-disable" : "is-enable"
+                  }`}
+                  aria-label={`${
+                    selectedCoreEnabled
+                      ? copy.disableCore
+                      : copy.enableCore
+                  }：${selectedCoreAsset.objectLabel}`}
+                  onClick={() =>
+                    setCoreAssetEnabled(
+                      selectedCoreId,
+                      !selectedCoreEnabled,
+                    )
+                  }
+                >
+                  {selectedCoreEnabled
+                    ? copy.disableCore
+                    : copy.enableCore}
+                </button>
+              </div>
+            }
+          >
+            {renderPlacementToolbar(
+              selectedCoreId,
+              !selectedCoreEnabled,
+            )}
+            <TransformEditor
+              transform={coreTransform}
+              relative
+              locale={locale}
+              disabled={placementIsActive || !selectedCoreEnabled}
+              onChange={(key, value) =>
+                updateCorePlacement(selectedCoreId, key, value)
+              }
+            />
+          </StudioSection>
+
+          <StudioSection
+            title={copy.replacement}
+            description={copy.replacementHelp}
+          >
+            <ModelUploadField
+              locale={locale}
+              label={copy.replacement}
+              description={copy.replacementHelp}
+              value={coreModelSrc}
+              disabled={!projectWritable}
+              purpose="core-replacement"
+              sceneActive={selectedCoreEnabled}
+              loadState={modelLoadStates[selectedCoreId]}
+              onUploaded={(modelSrc) =>
+                updateCoreAssetModel(selectedCoreId, modelSrc)
+              }
+              onClear={() =>
+                updateCoreAssetModel(selectedCoreId, undefined)
+              }
+            />
+          </StudioSection>
+        </>
       )}
 
       {selectedCustomAsset && (
@@ -986,6 +1155,7 @@ export function SceneStudio({
               description={copy.modelHelp}
               value={selectedCustomAsset.modelSrc}
               disabled={!projectWritable}
+              loadState={modelLoadStates[selectedCustomAsset.id]}
               onUploaded={(modelSrc) =>
                 updateCustomAsset(selectedCustomAsset.id, (asset) => ({
                   ...asset,

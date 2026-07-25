@@ -27,6 +27,7 @@ import {
   type SocialPlatform,
 } from "./content-config";
 import { ImageUploadField } from "./ImageUploadField";
+import type { CustomModelLoadState } from "./model-loading";
 import { SceneStudio } from "./SceneStudio";
 import { SocialIcon } from "./SocialIcon";
 import {
@@ -48,6 +49,7 @@ export interface ContentStudioProps {
   config: SiteContentConfig;
   profile: ProfileContent;
   assets: PortfolioAsset[];
+  modelLoadStates: Readonly<Record<string, CustomModelLoadState>>;
   placementEdit: ScenePlacementEdit | null;
   onChange: Dispatch<SetStateAction<SiteContentConfig>>;
   onLocaleChange: (locale: ContentLocale) => void;
@@ -362,6 +364,7 @@ export function ContentStudio({
   config,
   profile,
   assets,
+  modelLoadStates,
   placementEdit,
   onChange,
   onLocaleChange,
@@ -1565,6 +1568,7 @@ export function ContentStudio({
                 config={config}
                 assets={coreAssets}
                 projectWritable={projectWritable}
+                modelLoadStates={modelLoadStates}
                 placementEdit={placementEdit}
                 onChange={onChange}
                 onPlacementEditStart={(assetId) => {

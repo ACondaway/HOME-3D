@@ -7,6 +7,12 @@ import {
   useState,
 } from "react";
 import type { ContentLocale } from "./content-config";
+import {
+  forgetPreparedModelUpload,
+  prepareModelUpload,
+  rememberPreparedModelUpload,
+  type CustomModelLoadState,
+} from "./model-loading";
 
 const MAX_MODEL_BYTES = 24 * 1024 * 1024;
 const ACCEPTED_MODEL_TYPES = ".glb,model/gltf-binary";
@@ -24,6 +30,9 @@ interface ModelUploadFieldProps {
   description: string;
   value?: string;
   disabled?: boolean;
+  purpose?: "custom-asset" | "core-replacement";
+  sceneActive?: boolean;
+  loadState?: CustomModelLoadState;
   onUploaded: (url: string) => void;
   onClear: () => void;
 }
@@ -34,6 +43,9 @@ export function ModelUploadField({
   description,
   value,
   disabled = false,
+  purpose = "custom-asset",
+  sceneActive = true,
+  loadState,
   onUploaded,
   onClear,
 }: ModelUploadFieldProps) {
@@ -47,11 +59,24 @@ export function ModelUploadField({
       ? {
           choose: value ? "替换模型" : "选择模型",
           clear: "解除引用",
+          coreChoose: value ? "更换替换模型" : "上传替换模型",
+          coreClear: "恢复原生外观",
           drop: "拖动 GLB 模型到这里",
           formats: "自包含 GLB（glTF 2.0），最大 24 MiB",
           uploading: "正在上传…",
           uploaded: "已上传，请保存到项目",
+          fetching: "文件已写入，正在读取模型…",
+          processing: "正在解析网格与纹理…",
+          ready: "模型已在场景中显示",
+          coreReadyInactive: "替换模型已就绪；重新激活后显示",
+          loadErrors: {
+            request: "模型文件无法读取，请检查引用后重试",
+            "too-large": "模型超过运行时 24 MiB 限制",
+            parse: "模型已上传，但浏览器无法解析",
+            "empty-scene": "模型没有可显示的场景内容",
+          },
           unlinked: "已解除引用；模型文件仍保留在项目中",
+          coreUnlinked: "已恢复原生外观；上传文件仍保留在项目中",
           tooLarge: "模型不能超过 24 MiB",
           invalid: "无法上传，请使用有效的 glTF 2.0 GLB 文件",
           selfContained:
@@ -69,11 +94,26 @@ export function ModelUploadField({
       : {
           choose: value ? "Replace model" : "Choose model",
           clear: "Unlink",
+          coreChoose: value ? "Replace visual" : "Upload replacement",
+          coreClear: "Restore native visual",
           drop: "Drop a GLB model here",
           formats: "Self-contained GLB (glTF 2.0) · 24 MiB max",
           uploading: "Uploading…",
           uploaded: "Uploaded — save to project",
+          fetching: "File saved — reading the model…",
+          processing: "Processing geometry and textures…",
+          ready: "Model is visible in the scene",
+          coreReadyInactive:
+            "Replacement is ready and will appear when reactivated",
+          loadErrors: {
+            request: "The model file could not be read. Check its reference and retry",
+            "too-large": "The model exceeds the 24 MiB runtime limit",
+            parse: "The model uploaded, but the browser could not parse it",
+            "empty-scene": "The model does not contain a visible scene",
+          },
           unlinked: "Reference removed — the model file remains in the project",
+          coreUnlinked:
+            "Native visual restored — the uploaded file remains in the project",
           tooLarge: "Models must be 24 MiB or smaller",
           invalid: "Upload failed. Use a valid glTF 2.0 GLB file",
           selfContained:
@@ -90,6 +130,12 @@ export function ModelUploadField({
             "The GLB structure or binary ranges are invalid. Export a fresh glTF 2.0 GLB",
           localOnly: "Upload from the local Content Studio",
         };
+  const isCoreReplacement = purpose === "core-replacement";
+  const chooseLabel = isCoreReplacement ? copy.coreChoose : copy.choose;
+  const clearLabel = isCoreReplacement ? copy.coreClear : copy.clear;
+  const unlinkedMessage = isCoreReplacement
+    ? copy.coreUnlinked
+    : copy.unlinked;
 
   const messageForErrorCode = (code: unknown): string => {
     switch (code) {
@@ -131,6 +177,7 @@ export function ModelUploadField({
 
     setUploading(true);
     setMessage("");
+    const preparedUpload = prepareModelUpload(file);
     try {
       const response = await fetch("/__content-studio/upload?kind=models", {
         method: "POST",
@@ -154,6 +201,7 @@ export function ModelUploadField({
         return;
       }
 
+      rememberPreparedModelUpload(payload.url, preparedUpload);
       onUploaded(payload.url);
       setMessage(copy.uploaded);
     } catch {
@@ -162,6 +210,31 @@ export function ModelUploadField({
       setUploading(false);
     }
   };
+
+  const loadMessage =
+    value && loadState?.phase === "fetching"
+      ? copy.fetching
+      : value && loadState?.phase === "processing"
+        ? copy.processing
+        : value && loadState?.phase === "ready"
+          ? isCoreReplacement && !sceneActive
+            ? copy.coreReadyInactive
+            : copy.ready
+          : value && loadState?.phase === "error"
+            ? copy.loadErrors[loadState.error]
+            : "";
+  const displayedMessage = uploading
+    ? copy.uploading
+    : loadMessage || message;
+  const loadPhase = loadState?.phase ?? "empty";
+  const previewLabel =
+    uploading || loadPhase === "fetching" || loadPhase === "processing"
+      ? "···"
+      : loadPhase === "error"
+        ? "!"
+        : value
+          ? "3D"
+          : "GLB";
 
   const handleInput = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -183,15 +256,29 @@ export function ModelUploadField({
           <strong>{label}</strong>
           <p>{description}</p>
         </div>
-        {message && (
-          <span className="studio-media-status" role="status">
-            {message}
+        {displayedMessage && (
+          <span
+            className={`studio-media-status ${
+              loadPhase === "error" ? "is-error" : ""
+            }`}
+            role={loadPhase === "error" ? "alert" : "status"}
+          >
+            {displayedMessage}
           </span>
         )}
       </div>
 
       <div
-        className={`studio-dropzone ${dragActive ? "is-drag-active" : ""}`}
+        className={`studio-dropzone ${dragActive ? "is-drag-active" : ""} ${
+          loadPhase === "fetching" || loadPhase === "processing"
+            ? "is-model-loading"
+            : ""
+        } ${loadPhase === "error" ? "is-model-error" : ""}`}
+        aria-busy={
+          uploading ||
+          loadPhase === "fetching" ||
+          loadPhase === "processing"
+        }
         onDragEnter={(event) => {
           event.preventDefault();
           if (!disabled) setDragActive(true);
@@ -212,7 +299,7 @@ export function ModelUploadField({
         onDrop={handleDrop}
       >
         <div className="studio-media-preview" aria-hidden="true">
-          <span>{value ? "3D" : "GLB"}</span>
+          <span>{previewLabel}</span>
         </div>
         <div className="studio-dropzone-copy">
           <strong>{disabled ? copy.localOnly : copy.drop}</strong>
@@ -223,19 +310,21 @@ export function ModelUploadField({
               onClick={() => inputRef.current?.click()}
               disabled={disabled || uploading}
             >
-              {uploading ? copy.uploading : copy.choose}
+              {uploading ? copy.uploading : chooseLabel}
             </button>
             {value && (
               <button
                 type="button"
                 className="studio-media-clear"
                 onClick={() => {
+                  forgetPreparedModelUpload(value);
                   onClear();
-                  setMessage(copy.unlinked);
+                  setMessage(unlinkedMessage);
                 }}
                 disabled={uploading}
+                aria-label={`${clearLabel}: ${label}`}
               >
-                {copy.clear}
+                {clearLabel}
               </button>
             )}
           </div>

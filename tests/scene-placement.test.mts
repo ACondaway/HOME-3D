@@ -17,6 +17,11 @@ const baseConfig: SiteContentConfig = {
   profile: {},
   assets: {},
   scene: {
+    disabledCoreAssets: ["fitness"],
+    coreAssetModels: {
+      music:
+        "/uploads/models/11111111-1111-4111-8111-111111111111.glb",
+    },
     placements: {
       music: {
         position: [1, 2, 3],
@@ -93,6 +98,7 @@ test("starts placement drafts from relative core and absolute custom positions",
     rotation: [0, 90, 0],
   });
   assert.equal(beginScenePlacementEdit(baseConfig, "missing"), null);
+  assert.equal(beginScenePlacementEdit(baseConfig, "fitness"), null);
 
   if (!coreDraft) assert.fail("expected a core placement draft");
   coreDraft.position[0] = 99;
@@ -115,6 +121,11 @@ test("commits a core position without replacing rotation, scale, or siblings", (
     rotation: [0, 45, 0],
     scale: [1.2, 1.2, 1.2],
   });
+  assert.deepEqual(next.scene?.disabledCoreAssets, ["fitness"]);
+  assert.equal(
+    next.scene?.coreAssetModels?.music,
+    baseConfig.scene?.coreAssetModels?.music,
+  );
   assert.equal(
     next.scene?.customAssets?.[0],
     baseConfig.scene?.customAssets?.[0],

@@ -92,9 +92,9 @@ Content Studio 让个人主页保持可编辑，同时避免退化成一个通�
 
 Fork 这个项目后，只需描述你想改变的内容、物件或交互，Coding Agent 就可以依据仓库内置的 Agent Skills 工作。技能包沉淀了内容 schema、中英双语编辑模型、Three.js 场景约定、资产安全规则、验证门禁与 push-to-deploy 流程，让 DIY 从表达意图开始，而不是重新摸索代码结构。
 
-| [`$living-index-content`](./skills/living-index-content/SKILL.md) | [`$living-index-scene`](./skills/living-index-scene/SKILL.md) | [`$living-index-developer`](./skills/living-index-developer/SKILL.md) |
-|---|---|---|
-| 个人资料、媒体、摄影、Spotlight、社交链接与组合式卡片。 | 时区光照、物体摆放、GLB 资产与装饰/交互行为。 | 新框架能力、无障碍交互、测试与安全交付。 |
+| [`$living-index-content`](./skills/living-index-content/SKILL.md) | [`$living-index-scene`](./skills/living-index-scene/SKILL.md) | [`$living-index-native-assets`](./skills/living-index-native-assets/SKILL.md) | [`$living-index-developer`](./skills/living-index-developer/SKILL.md) |
+|---|---|---|---|
+| 个人资料、媒体、摄影、Spotlight、社交链接与组合式卡片。 | 时区光照、摆放、GLB 资产与场景行为。 | 用 Three.js 原生生成轻量家具、道具、灯光与装饰。 | 新框架能力、无障碍交互、测试与安全交付。 |
 
 从仓库内的 [Coding Agent 指南](./AGENTS.md) 开始。所有 skills 都是可检查、可修改、可复用并采用 MIT 许可的纯 Markdown。
 
@@ -107,7 +107,8 @@ Fork 这个项目后，只需描述你想改变的内容、物件或交互，Cod
 - 📷 **完整摄影展示** — 所有照片都会展示，Spotlight 图片拥有单独的文字介绍区域。
 - 🧱 **组合式内容卡片** — 纯文字、图文和链接按钮可以使用标准、宽版或整行布局。
 - 🧭 **直接编辑场景** — 移动、升降、旋转、缩放并确认物体摆放，不需要离开可视化编辑器。
-- 📦 **导入自有资产** — 经过校验的自包含 GLB 可以作为纯装饰或新的交互内容。
+- 📦 **导入自有资产** — 经过校验的自包含 GLB 可以作为新物件，也可以可逆地替换内置物件外观。
+- 🧰 **直接生成轻量道具** — Coding Agent 可以复用房间的 Three.js 原生几何生成响应光照的简单资产，无需先制作 GLB。
 - ♿ **与 3D 等价的阅读路径** — 语义化导航、键盘、减少动态效果和 WebGL 降级属于核心体验。
 
 ## ⚙️ 技术栈

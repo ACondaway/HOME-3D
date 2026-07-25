@@ -110,6 +110,11 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(room, /asset\.behavior !== "interactive"/);
   assert.match(room, /handleRef\.current\?\.sync\(sceneConfig, assets\)/);
   assert.match(room, /runtimeAssetById/);
+  assert.match(room, /setCoreRuntimeEnabled/);
+  assert.match(room, /loadCoreModel/);
+  assert.match(room, /fitCoreReplacementModel/);
+  assert.match(room, /relatedAssets/);
+  assert.match(room, /studioAssets/);
   assert.match(room, /mergeCustomSceneAssets/);
   assert.match(room, /mergeSceneConfig/);
   assert.match(room, /Object\.hasOwn\(assetById, section\)/);
@@ -152,6 +157,11 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(modelUpload, /onDrop=/);
   assert.match(modelUpload, /accept=\{ACCEPTED_MODEL_TYPES\}/);
   assert.match(sceneStudio, /updateCorePlacement/);
+  assert.match(sceneStudio, /disabledCoreAssets/);
+  assert.match(sceneStudio, /coreAssetModels/);
+  assert.match(sceneStudio, /停用物件/);
+  assert.match(sceneStudio, /重新激活/);
+  assert.match(sceneStudio, /替换内置模型/);
   assert.match(sceneStudio, /<TransformEditor/);
   assert.match(sceneStudio, /studio-placement-toolbar/);
   assert.match(sceneStudio, /studio-placement-modes/);
@@ -199,6 +209,7 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(room, /asset\.id !== "photography"/);
   assert.match(contentConfig, /normalizeSiteContent/);
   assert.match(contentConfig, /mergeAssets/);
+  assert.match(contentConfig, /isCoreSceneAssetEnabled/);
   assert.match(contentConfig, /mergeMedia/);
   assert.match(contentConfig, /mergeSocialLinks/);
   assert.match(contentConfig, /timezone: "GMT\+8"/);

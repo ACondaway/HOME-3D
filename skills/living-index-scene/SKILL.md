@@ -13,7 +13,11 @@ Use the persisted scene schema for composition and the Three.js runtime only for
 2. Read `references/scene-system.md` before editing transforms, lighting, GLB files, or scene interactions.
 3. Inspect `app/content-config.ts`, `public/content/site-content.json`, and the relevant runtime/editor code.
 4. Classify the change:
-   - Existing built-in object: write a relative `scene.placements` override.
+   - Existing built-in object: write a relative `scene.placements` override,
+     toggle it through `scene.disabledCoreAssets`, or replace only its visual
+     through `scene.coreAssetModels`.
+   - New simple geometric object without authored textures: use
+     `$living-index-native-assets`.
    - New decoration: create a custom asset with `behavior: "decorative"`.
    - New content entrance: create a custom asset with `behavior: "interactive"` and bilingual content.
    - New scene behavior or interaction: use `$living-index-developer`.
@@ -30,8 +34,13 @@ Use the persisted scene schema for composition and the Three.js runtime only for
 5. Use the numeric editor for scale; no drag-scale mode exists.
 6. Confirm to commit the draft or cancel/press Escape to restore the saved transform.
 7. Treat core-object transforms as relative and custom-object transforms as absolute.
-8. Keep decorative assets visible but absent from hit targets, navigation, index, and detail routes.
-9. Give interactive assets localized labels and content cards; verify click, keyboard, index, and non-WebGL access.
+8. Keep disabled built-in objects in code and Studio, but remove them from the
+   rendered room, hit targets, navigation, index, and detail routes.
+9. Treat a core GLB as a reversible visual override. Preserve the built-in ID,
+   content, hitbox, signal, and placement; clearing it restores the native
+   visual.
+10. Keep decorative assets visible but absent from hit targets, navigation, index, and detail routes.
+11. Give interactive assets localized labels and content cards; verify click, keyboard, index, and non-WebGL access.
 
 ## Drive author-local light
 

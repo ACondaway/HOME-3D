@@ -4,11 +4,36 @@ import test from "node:test";
 const { parseUploadKind, validateContent, validateGlb } = (await import(
   new URL("../build/content-studio-vite-plugin.ts", import.meta.url).href
 )) as typeof import("../build/content-studio-vite-plugin");
+const {
+  prepareModelUpload,
+  rememberPreparedModelUpload,
+  takePreparedModelUpload,
+} = (await import(
+  new URL("../app/model-loading.ts", import.meta.url).href
+)) as typeof import("../app/model-loading");
 
 type GlbDocument = Record<string, unknown>;
 
 const JSON_CHUNK_TYPE = 0x4e4f534a;
 const BIN_CHUNK_TYPE = 0x004e4942;
+
+test("reuses the selected model buffer after upload", async () => {
+  const modelSrc =
+    "/uploads/models/11111111-1111-4111-8111-111111111111.glb";
+  const upload = prepareModelUpload(
+    new Blob([Uint8Array.from([0x67, 0x6c, 0x54, 0x46])]),
+  );
+
+  rememberPreparedModelUpload(modelSrc, upload);
+  const cached = takePreparedModelUpload(modelSrc);
+
+  assert.equal(cached, upload);
+  assert.deepEqual(
+    Array.from(new Uint8Array(await cached!.buffer)),
+    [0x67, 0x6c, 0x54, 0x46],
+  );
+  assert.equal(takePreparedModelUpload(modelSrc), undefined);
+});
 
 test("accepts card uploads and rejects unsafe card content on save", () => {
   assert.equal(parseUploadKind("cards"), "cards");

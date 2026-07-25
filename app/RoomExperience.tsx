@@ -28,6 +28,7 @@ import {
 } from "./portfolio-data-en";
 import {
   EMPTY_SITE_CONTENT,
+  isCoreSceneAssetEnabled,
   mergeCustomSceneAssets,
   mergeAssets,
   mergeMedia,
@@ -64,6 +65,11 @@ import {
   type ScenePlacementEdit,
   type ScenePlacementMode,
 } from "./scene-placement.ts";
+import {
+  takePreparedModelUpload,
+  type CustomModelLoadError,
+  type CustomModelLoadState,
+} from "./model-loading";
 
 type Locale = ContentLocale;
 
@@ -243,6 +249,7 @@ interface RoomSceneProps {
   timeZone: string;
   onSelect: (id: AssetId) => void;
   onHover: (id: AssetId | null) => void;
+  onModelLoadState: (id: AssetId, state: CustomModelLoadState) => void;
   onPlacementPreview: (edit: ScenePlacementEdit) => void;
   onReady: () => void;
   onError: () => void;
@@ -264,6 +271,18 @@ interface SceneAssetLighting {
 interface CoreSceneRuntime {
   id: CoreAssetId;
   root: THREE.Object3D;
+  hitbox: THREE.Mesh;
+  visibilityChildren: THREE.Object3D[];
+  nativeVisualChildren: THREE.Object3D[];
+  nativeBounds: THREE.Box3;
+  enabled: boolean;
+  model?: THREE.Object3D;
+  modelSrc?: string;
+  loadController?: AbortController;
+  loadRetryCount: number;
+  loadRetryTimeout?: number;
+  loadVersion: number;
+  loadState: CustomModelLoadState;
   defaultPosition: THREE.Vector3;
   defaultRotation: THREE.Euler;
   defaultScale: THREE.Vector3;
@@ -284,7 +303,10 @@ interface CustomSceneRuntime {
   hitbox?: THREE.Mesh<THREE.BoxGeometry, THREE.MeshBasicMaterial>;
   signal?: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   loadController?: AbortController;
+  loadRetryCount: number;
+  loadRetryTimeout?: number;
   loadVersion: number;
+  loadState: CustomModelLoadState;
 }
 
 const DEGREES_TO_RADIANS = Math.PI / 180;
@@ -433,6 +455,7 @@ function addSignal(
     material,
   );
   signal.position.set(...position);
+  signal.userData.assetSignalId = id;
   parent.add(signal);
   return signal;
 }
@@ -839,13 +862,20 @@ function createResearchAndContactAssets(
   desk.position.set(0.45, 0, -3.65);
   scene.add(desk);
 
-  addBox(desk, [3.55, 0.16, 1.35], [0, 1.05, 0], "#785a43", {
+  const deskSurface = addBox(desk, [3.55, 0.16, 1.35], [0, 1.05, 0], "#785a43", {
     roughness: 0.68,
   });
+  deskSurface.userData.sharedCoreAssetIds = ["research", "contact"];
   [-1.5, 1.5].forEach((x) => {
-    [-0.48, 0.48].forEach((z) =>
-      addBox(desk, [0.14, 1.02, 0.14], [x, 0.52, z], "#4a382f"),
-    );
+    [-0.48, 0.48].forEach((z) => {
+      const leg = addBox(
+        desk,
+        [0.14, 1.02, 0.14],
+        [x, 0.52, z],
+        "#4a382f",
+      );
+      leg.userData.sharedCoreAssetIds = ["research", "contact"];
+    });
   });
 
   const laptop = new THREE.Group();
@@ -1355,14 +1385,18 @@ function RoomScene({
   timeZone,
   onSelect,
   onHover,
+  onModelLoadState,
   onPlacementPreview,
   onReady,
   onError,
 }: RoomSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<SceneHandle | null>(null);
+  const initialSceneConfigRef = useRef(sceneConfig);
+  const initialAssetsRef = useRef(assets);
   const onSelectRef = useRef(onSelect);
   const onHoverRef = useRef(onHover);
+  const onModelLoadStateRef = useRef(onModelLoadState);
   const onPlacementPreviewRef = useRef(onPlacementPreview);
   const onReadyRef = useRef(onReady);
   const onErrorRef = useRef(onError);
@@ -1372,6 +1406,7 @@ function RoomScene({
   useEffect(() => {
     onSelectRef.current = onSelect;
     onHoverRef.current = onHover;
+    onModelLoadStateRef.current = onModelLoadState;
     onPlacementPreviewRef.current = onPlacementPreview;
     onReadyRef.current = onReady;
     onErrorRef.current = onError;
@@ -1465,6 +1500,14 @@ function RoomScene({
       coreRuntimes.set(id, {
         id,
         root: hitbox.parent,
+        hitbox,
+        visibilityChildren: [],
+        nativeVisualChildren: [],
+        nativeBounds: new THREE.Box3(),
+        enabled: true,
+        loadRetryCount: 0,
+        loadVersion: 0,
+        loadState: { phase: "empty" },
         defaultPosition: hitbox.parent.position.clone(),
         defaultRotation: hitbox.parent.rotation.clone(),
         defaultScale: hitbox.parent.scale.clone(),
@@ -1489,6 +1532,298 @@ function RoomScene({
       deskLight.position.set(-0.77, 1.78, -3.93);
       scene.add(deskLight);
     }
+
+    for (const runtime of coreRuntimes.values()) {
+      const nestedCoreBranches = new Set<THREE.Object3D>();
+      for (const otherRuntime of coreRuntimes.values()) {
+        if (otherRuntime === runtime) continue;
+        let branch = otherRuntime.root;
+        while (branch.parent && branch.parent !== runtime.root) {
+          branch = branch.parent;
+        }
+        if (branch.parent === runtime.root) {
+          nestedCoreBranches.add(branch);
+        }
+      }
+      runtime.visibilityChildren = runtime.root.children.filter(
+        (child) => !nestedCoreBranches.has(child),
+      );
+      runtime.nativeVisualChildren = runtime.visibilityChildren.filter(
+        (child) =>
+          child !== runtime.hitbox &&
+          child.userData.assetSignalId !== runtime.id,
+      );
+
+      const inverseRootMatrix = runtime.root.matrixWorld.clone().invert();
+      for (const child of runtime.nativeVisualChildren) {
+        if (child instanceof THREE.Light) continue;
+        const childBounds = new THREE.Box3().setFromObject(child, true);
+        if (!childBounds.isEmpty()) {
+          runtime.nativeBounds.union(
+            childBounds.applyMatrix4(inverseRootMatrix),
+          );
+        }
+      }
+    }
+
+    const updateCoreRuntimeAppearance = (runtime: CoreSceneRuntime) => {
+      const showNative = runtime.enabled && !runtime.model;
+      for (const child of runtime.nativeVisualChildren) {
+        const sharedAssetIds = child.userData.sharedCoreAssetIds;
+        const supportsEnabledNestedAsset =
+          Array.isArray(sharedAssetIds) &&
+          sharedAssetIds.some(
+            (assetId) =>
+              typeof assetId === "string" &&
+              assetId !== runtime.id &&
+              isAssetId(assetId) &&
+              coreRuntimes.get(assetId)?.enabled,
+          );
+        child.visible = showNative || supportsEnabledNestedAsset;
+      }
+      runtime.hitbox.visible = runtime.enabled;
+      for (const child of runtime.visibilityChildren) {
+        if (child.userData.assetSignalId === runtime.id) {
+          child.visible = runtime.enabled;
+        }
+      }
+      if (runtime.model) runtime.model.visible = runtime.enabled;
+    };
+
+    const setCoreRuntimeEnabled = (
+      runtime: CoreSceneRuntime,
+      enabled: boolean,
+    ) => {
+      runtime.enabled = enabled;
+      updateCoreRuntimeAppearance(runtime);
+    };
+
+    const reportCoreModelLoadState = (
+      runtime: CoreSceneRuntime,
+      state: CustomModelLoadState,
+    ) => {
+      runtime.loadState = state;
+      onModelLoadStateRef.current(runtime.id, state);
+    };
+
+    const fitCoreReplacementModel = (
+      runtime: CoreSceneRuntime,
+      model: THREE.Object3D,
+    ) => {
+      if (runtime.nativeBounds.isEmpty()) return;
+
+      model.updateMatrixWorld(true);
+      const sourceBounds = new THREE.Box3().setFromObject(model, true);
+      if (sourceBounds.isEmpty()) return;
+
+      const sourceSize = sourceBounds.getSize(new THREE.Vector3());
+      const targetSize = runtime.nativeBounds.getSize(new THREE.Vector3());
+      const scaleCandidates = (
+        ["x", "y", "z"] as const
+      ).flatMap((axis) =>
+        sourceSize[axis] > 1e-5 && targetSize[axis] > 1e-5
+          ? [targetSize[axis] / sourceSize[axis]]
+          : [],
+      );
+      if (scaleCandidates.length === 0) return;
+
+      const scale = Math.min(...scaleCandidates);
+      if (!Number.isFinite(scale) || scale <= 0) return;
+      model.scale.multiplyScalar(scale);
+      model.updateMatrixWorld(true);
+
+      const fittedBounds = new THREE.Box3().setFromObject(model, true);
+      const fittedCenter = fittedBounds.getCenter(new THREE.Vector3());
+      const targetCenter = runtime.nativeBounds.getCenter(
+        new THREE.Vector3(),
+      );
+      model.position.x += targetCenter.x - fittedCenter.x;
+      model.position.y += runtime.nativeBounds.min.y - fittedBounds.min.y;
+      model.position.z += targetCenter.z - fittedCenter.z;
+      model.updateMatrixWorld(true);
+    };
+
+    const loadCoreModel = (
+      runtime: CoreSceneRuntime,
+      modelSrc: string | undefined,
+    ) => {
+      if (runtime.loadRetryTimeout !== undefined) {
+        window.clearTimeout(runtime.loadRetryTimeout);
+        runtime.loadRetryTimeout = undefined;
+      }
+      runtime.loadController?.abort();
+      runtime.loadController = undefined;
+      runtime.loadVersion += 1;
+      const loadVersion = runtime.loadVersion;
+      if (runtime.modelSrc !== modelSrc) runtime.loadRetryCount = 0;
+      runtime.modelSrc = modelSrc;
+
+      if (!modelSrc) {
+        if (runtime.model) {
+          runtime.model.removeFromParent();
+          disposeObjectResources(runtime.model);
+          runtime.model = undefined;
+        }
+        updateCoreRuntimeAppearance(runtime);
+        reportCoreModelLoadState(runtime, { phase: "empty" });
+        scene.updateMatrixWorld(true);
+        if (activeMarkerId === runtime.id) showMarker(runtime.id);
+        return;
+      }
+
+      const controller = new AbortController();
+      runtime.loadController = controller;
+      const isCurrentLoad = () =>
+        !sceneDisposed &&
+        !controller.signal.aborted &&
+        runtime.loadVersion === loadVersion &&
+        coreRuntimes.get(runtime.id) === runtime;
+
+      reportCoreModelLoadState(runtime, {
+        phase: "fetching",
+        modelSrc,
+      });
+
+      void (async () => {
+        let loadError: CustomModelLoadError = "request";
+        try {
+          const preparedUpload = takePreparedModelUpload(modelSrc);
+          let buffer: ArrayBuffer;
+
+          if (preparedUpload) {
+            if (preparedUpload.byteLength > MAX_RUNTIME_MODEL_BYTES) {
+              loadError = "too-large";
+              throw new Error("Model exceeds the runtime size limit");
+            }
+            buffer = await preparedUpload.buffer;
+          } else {
+            const response = await fetch(modelSrc, {
+              credentials: "same-origin",
+              signal: controller.signal,
+            });
+            if (!response.ok) throw new Error("Model request failed");
+
+            const contentLength = response.headers.get("content-length");
+            if (
+              contentLength &&
+              Number.isFinite(Number(contentLength)) &&
+              Number(contentLength) > MAX_RUNTIME_MODEL_BYTES
+            ) {
+              loadError = "too-large";
+              throw new Error("Model exceeds the runtime size limit");
+            }
+            buffer = await response.arrayBuffer();
+          }
+
+          if (buffer.byteLength > MAX_RUNTIME_MODEL_BYTES) {
+            loadError = "too-large";
+            throw new Error("Model exceeds the runtime size limit");
+          }
+          if (!isCurrentLoad()) return;
+
+          reportCoreModelLoadState(runtime, {
+            phase: "processing",
+            modelSrc,
+          });
+          loadError = "parse";
+          const modelBaseUrl = new URL(
+            ".",
+            new URL(modelSrc, window.location.href),
+          ).href;
+          const gltf = await gltfLoader.parseAsync(buffer, modelBaseUrl);
+          const model = gltf.scene;
+          if (!isCurrentLoad()) {
+            disposeObjectResources(model);
+            return;
+          }
+
+          model.updateMatrixWorld(true);
+          const sourceBounds = new THREE.Box3().setFromObject(model, true);
+          if (sourceBounds.isEmpty()) {
+            disposeObjectResources(model);
+            reportCoreModelLoadState(runtime, {
+              phase: "error",
+              modelSrc,
+              error: "empty-scene",
+            });
+            return;
+          }
+
+          fitCoreReplacementModel(runtime, model);
+          model.traverse((object) => {
+            if (!(object instanceof THREE.Mesh)) return;
+            object.castShadow = true;
+            object.receiveShadow = true;
+            const materials = Array.isArray(object.material)
+              ? object.material
+              : [object.material];
+            for (const material of materials) {
+              for (const value of Object.values(material)) {
+                if (value instanceof THREE.Texture) {
+                  renderer.initTexture(value);
+                }
+              }
+            }
+          });
+
+          await renderer.compileAsync(model, camera, scene);
+          if (!isCurrentLoad()) {
+            disposeObjectResources(model);
+            return;
+          }
+
+          const previousModel = runtime.model;
+          runtime.model = model;
+          runtime.root.add(model);
+          updateCoreRuntimeAppearance(runtime);
+          if (previousModel) {
+            previousModel.removeFromParent();
+            disposeObjectResources(previousModel);
+          }
+          reportCoreModelLoadState(runtime, {
+            phase: "ready",
+            modelSrc,
+          });
+          scene.updateMatrixWorld(true);
+          if (activeMarkerId === runtime.id) showMarker(runtime.id);
+        } catch {
+          if (!isCurrentLoad()) return;
+          const shouldRetry =
+            runtime.loadRetryCount < 1 &&
+            (loadError === "request" || loadError === "parse");
+          if (shouldRetry) {
+            runtime.loadRetryCount += 1;
+            reportCoreModelLoadState(runtime, {
+              phase: "fetching",
+              modelSrc,
+            });
+            runtime.loadRetryTimeout = window.setTimeout(() => {
+              runtime.loadRetryTimeout = undefined;
+              if (
+                !sceneDisposed &&
+                coreRuntimes.get(runtime.id) === runtime &&
+                runtime.modelSrc === modelSrc
+              ) {
+                loadCoreModel(runtime, modelSrc);
+              }
+            }, 650);
+            return;
+          }
+          reportCoreModelLoadState(runtime, {
+            phase: "error",
+            modelSrc,
+            error: loadError,
+          });
+          updateCoreRuntimeAppearance(runtime);
+          scene.updateMatrixWorld(true);
+          if (activeMarkerId === runtime.id) showMarker(runtime.id);
+        } finally {
+          if (runtime.loadController === controller) {
+            runtime.loadController = undefined;
+          }
+        }
+      })();
+    };
 
     const markerMaterial = new THREE.MeshBasicMaterial({
       color: "#e2a85f",
@@ -1670,11 +2005,14 @@ function RoomScene({
     const pick = (event: PointerEvent) => {
       setPointer(event);
       raycaster.setFromCamera(pointer, camera);
-      const intersection = raycaster.intersectObjects(hitboxes, false)[0];
-      const id = intersection?.object.userData.assetId;
-      return typeof id === "string" && runtimeAssetById.has(id)
-        ? id
-        : null;
+      const intersections = raycaster.intersectObjects(hitboxes, false);
+      for (const intersection of intersections) {
+        const id = intersection.object.userData.assetId;
+        if (typeof id === "string" && runtimeAssetById.has(id)) {
+          return id;
+        }
+      }
+      return null;
     };
 
     const showMarker = (id: AssetId | null) => {
@@ -1811,26 +2149,50 @@ function RoomScene({
       updateCustomInteractionBounds(runtime);
     };
 
+    const reportCustomModelLoadState = (
+      runtime: CustomSceneRuntime,
+      state: CustomModelLoadState,
+    ) => {
+      runtime.loadState = state;
+      onModelLoadStateRef.current(runtime.id, state);
+    };
+
     const loadCustomModel = (
       runtime: CustomSceneRuntime,
       modelSrc: string | undefined,
     ) => {
+      if (runtime.loadRetryTimeout !== undefined) {
+        window.clearTimeout(runtime.loadRetryTimeout);
+        runtime.loadRetryTimeout = undefined;
+      }
       runtime.loadController?.abort();
       runtime.loadController = undefined;
       runtime.loadVersion += 1;
       const loadVersion = runtime.loadVersion;
+      if (runtime.modelSrc !== modelSrc) runtime.loadRetryCount = 0;
       runtime.modelSrc = modelSrc;
 
-      if (runtime.model) {
-        runtime.model.removeFromParent();
-        disposeObjectResources(runtime.model);
-        runtime.model = undefined;
+      runtime.placeholder.visible = !runtime.model;
+      runtime.placeholder.rotation.set(0, 0, 0);
+      runtime.placeholder.scale.setScalar(1);
+      runtime.placeholder.material.opacity = 0.72;
+      if (!runtime.model) {
+        runtime.localBounds.copy(FALLBACK_MODEL_BOUNDS);
+        updateCustomInteractionBounds(runtime);
       }
-      runtime.placeholder.visible = true;
-      runtime.localBounds.copy(FALLBACK_MODEL_BOUNDS);
-      updateCustomInteractionBounds(runtime);
 
-      if (!modelSrc) return;
+      if (!modelSrc) {
+        if (runtime.model) {
+          runtime.model.removeFromParent();
+          disposeObjectResources(runtime.model);
+          runtime.model = undefined;
+        }
+        runtime.placeholder.visible = true;
+        runtime.localBounds.copy(FALLBACK_MODEL_BOUNDS);
+        updateCustomInteractionBounds(runtime);
+        reportCustomModelLoadState(runtime, { phase: "empty" });
+        return;
+      }
 
       const controller = new AbortController();
       runtime.loadController = controller;
@@ -1840,29 +2202,54 @@ function RoomScene({
         runtime.loadVersion === loadVersion &&
         customRuntimes.get(runtime.id) === runtime;
 
-      void (async () => {
-        try {
-          const response = await fetch(modelSrc, {
-            credentials: "same-origin",
-            signal: controller.signal,
-          });
-          if (!response.ok) throw new Error("Model request failed");
+      reportCustomModelLoadState(runtime, {
+        phase: "fetching",
+        modelSrc,
+      });
 
-          const contentLength = response.headers.get("content-length");
-          if (
-            contentLength &&
-            Number.isFinite(Number(contentLength)) &&
-            Number(contentLength) > MAX_RUNTIME_MODEL_BYTES
-          ) {
-            throw new Error("Model exceeds the runtime size limit");
+      void (async () => {
+        let loadError: CustomModelLoadError = "request";
+        try {
+          const preparedUpload = takePreparedModelUpload(modelSrc);
+          let buffer: ArrayBuffer;
+
+          if (preparedUpload) {
+            if (preparedUpload.byteLength > MAX_RUNTIME_MODEL_BYTES) {
+              loadError = "too-large";
+              throw new Error("Model exceeds the runtime size limit");
+            }
+            buffer = await preparedUpload.buffer;
+          } else {
+            const response = await fetch(modelSrc, {
+              credentials: "same-origin",
+              signal: controller.signal,
+            });
+            if (!response.ok) throw new Error("Model request failed");
+
+            const contentLength = response.headers.get("content-length");
+            if (
+              contentLength &&
+              Number.isFinite(Number(contentLength)) &&
+              Number(contentLength) > MAX_RUNTIME_MODEL_BYTES
+            ) {
+              loadError = "too-large";
+              throw new Error("Model exceeds the runtime size limit");
+            }
+
+            buffer = await response.arrayBuffer();
           }
 
-          const buffer = await response.arrayBuffer();
           if (buffer.byteLength > MAX_RUNTIME_MODEL_BYTES) {
+            loadError = "too-large";
             throw new Error("Model exceeds the runtime size limit");
           }
           if (!isCurrentLoad()) return;
 
+          reportCustomModelLoadState(runtime, {
+            phase: "processing",
+            modelSrc,
+          });
+          loadError = "parse";
           const modelBaseUrl = new URL(
             ".",
             new URL(modelSrc, window.location.href),
@@ -1878,6 +2265,11 @@ function RoomScene({
           const bounds = new THREE.Box3().setFromObject(model, true);
           if (bounds.isEmpty()) {
             disposeObjectResources(model);
+            reportCustomModelLoadState(runtime, {
+              phase: "error",
+              modelSrc,
+              error: "empty-scene",
+            });
             return;
           }
 
@@ -1885,19 +2277,76 @@ function RoomScene({
             if (!(object instanceof THREE.Mesh)) return;
             object.castShadow = true;
             object.receiveShadow = true;
+            const materials = Array.isArray(object.material)
+              ? object.material
+              : [object.material];
+            for (const material of materials) {
+              for (const value of Object.values(material)) {
+                if (value instanceof THREE.Texture) {
+                  renderer.initTexture(value);
+                }
+              }
+            }
           });
+
+          await renderer.compileAsync(model, camera, scene);
+          if (!isCurrentLoad()) {
+            disposeObjectResources(model);
+            return;
+          }
+
+          const previousModel = runtime.model;
           runtime.model = model;
           runtime.localBounds.copy(bounds);
           runtime.root.add(model);
           runtime.placeholder.visible = false;
+          if (previousModel) {
+            previousModel.removeFromParent();
+            disposeObjectResources(previousModel);
+          }
+          reportCustomModelLoadState(runtime, {
+            phase: "ready",
+            modelSrc,
+          });
           updateCustomInteractionBounds(runtime);
           scene.updateMatrixWorld(true);
           if (activeMarkerId === runtime.id) showMarker(runtime.id);
         } catch {
           if (!isCurrentLoad()) return;
-          runtime.placeholder.visible = true;
-          runtime.localBounds.copy(FALLBACK_MODEL_BOUNDS);
-          updateCustomInteractionBounds(runtime);
+          const shouldRetry =
+            runtime.loadRetryCount < 1 &&
+            (loadError === "request" || loadError === "parse");
+          if (shouldRetry) {
+            runtime.loadRetryCount += 1;
+            reportCustomModelLoadState(runtime, {
+              phase: "fetching",
+              modelSrc,
+            });
+            runtime.loadRetryTimeout = window.setTimeout(() => {
+              runtime.loadRetryTimeout = undefined;
+              if (
+                !sceneDisposed &&
+                customRuntimes.get(runtime.id) === runtime &&
+                runtime.modelSrc === modelSrc
+              ) {
+                loadCustomModel(runtime, modelSrc);
+              }
+            }, 650);
+            return;
+          }
+          reportCustomModelLoadState(runtime, {
+            phase: "error",
+            modelSrc,
+            error: loadError,
+          });
+          if (!runtime.model) {
+            runtime.placeholder.visible = true;
+            runtime.placeholder.rotation.set(0, 0, 0);
+            runtime.placeholder.scale.setScalar(1);
+            runtime.placeholder.material.opacity = 0.86;
+            runtime.localBounds.copy(FALLBACK_MODEL_BOUNDS);
+            updateCustomInteractionBounds(runtime);
+          }
           scene.updateMatrixWorld(true);
           if (activeMarkerId === runtime.id) showMarker(runtime.id);
         } finally {
@@ -1935,13 +2384,19 @@ function RoomScene({
         root,
         placeholder,
         localBounds: FALLBACK_MODEL_BOUNDS.clone(),
+        loadRetryCount: 0,
         loadVersion: 0,
+        loadState: { phase: "empty" },
       };
       customRuntimes.set(asset.id, runtime);
       return runtime;
     };
 
     const removeCustomRuntime = (runtime: CustomSceneRuntime) => {
+      if (runtime.loadRetryTimeout !== undefined) {
+        window.clearTimeout(runtime.loadRetryTimeout);
+        runtime.loadRetryTimeout = undefined;
+      }
       runtime.loadController?.abort();
       runtime.loadController = undefined;
       runtime.loadVersion += 1;
@@ -1957,7 +2412,10 @@ function RoomScene({
     let focusedId: AssetId | null = null;
 
     const getPlacementRoot = (assetId: string) => {
-      if (isAssetId(assetId)) return coreRuntimes.get(assetId)?.root ?? null;
+      if (isAssetId(assetId)) {
+        const runtime = coreRuntimes.get(assetId);
+        return runtime?.enabled ? runtime.root : null;
+      }
       return (
         customRuntimes.get(assetId as CustomSceneAsset["id"])?.root ?? null
       );
@@ -1965,7 +2423,10 @@ function RoomScene({
 
     const hasRuntimeAsset = (assetId: string) =>
       isAssetId(assetId)
-        ? coreRuntimes.has(assetId)
+        ? Boolean(
+            coreRuntimes.get(assetId)?.enabled &&
+              runtimeAssetById.has(assetId),
+          )
         : customRuntimes.has(assetId as CustomSceneAsset["id"]);
 
     const applyPlacementPreview = (edit: ScenePlacementEdit) => {
@@ -1973,7 +2434,9 @@ function RoomScene({
       const rotation = edit.rotation;
       if (isAssetId(edit.assetId)) {
         const runtime = coreRuntimes.get(edit.assetId);
-        if (!runtime) return false;
+        if (!runtime?.enabled || !runtimeAssetById.has(edit.assetId)) {
+          return false;
+        }
         runtime.root.position.set(
           runtime.defaultPosition.x + position[0],
           runtime.defaultPosition.y + position[1],
@@ -2193,7 +2656,19 @@ function RoomScene({
       );
 
       for (const [id, runtime] of coreRuntimes) {
+        setCoreRuntimeEnabled(
+          runtime,
+          isCoreSceneAssetEnabled(nextSceneConfig, id) &&
+            runtimeAssetById.has(id),
+        );
         applyCorePlacement(runtime, nextSceneConfig.placements?.[id]);
+        const modelSrc = nextSceneConfig.coreAssetModels?.[id];
+        if (runtime.modelSrc !== modelSrc) {
+          loadCoreModel(runtime, modelSrc);
+        }
+      }
+      for (const runtime of coreRuntimes.values()) {
+        updateCoreRuntimeAppearance(runtime);
       }
 
       const nextCustomIds = new Set<CustomSceneAsset["id"]>();
@@ -2785,6 +3260,20 @@ function RoomScene({
       if (placementDragPointerId === null) controls.update();
       if (!reducedMotion.matches) {
         animated.forEach((callback) => callback(elapsed, delta));
+        for (const runtime of customRuntimes.values()) {
+          if (
+            !runtime.placeholder.visible ||
+            (runtime.loadState.phase !== "fetching" &&
+              runtime.loadState.phase !== "processing")
+          ) {
+            continue;
+          }
+          const pulse = 0.96 + Math.sin(elapsed * 3.2) * 0.035;
+          runtime.placeholder.rotation.y += delta * 0.72;
+          runtime.placeholder.scale.setScalar(pulse);
+          runtime.placeholder.material.opacity =
+            0.48 + Math.sin(elapsed * 3.2) * 0.12;
+        }
         if (marker.visible) {
           const pulse = 1 + Math.sin(elapsed * 2.4) * 0.09;
           marker.scale.setScalar(pulse);
@@ -2794,10 +3283,25 @@ function RoomScene({
       renderer.render(scene, camera);
     });
 
+    syncScene(initialSceneConfigRef.current, initialAssetsRef.current);
     onReadyRef.current();
 
     return () => {
       sceneDisposed = true;
+      for (const runtime of coreRuntimes.values()) {
+        if (runtime.loadRetryTimeout !== undefined) {
+          window.clearTimeout(runtime.loadRetryTimeout);
+          runtime.loadRetryTimeout = undefined;
+        }
+        runtime.loadController?.abort();
+        runtime.loadController = undefined;
+        runtime.loadVersion += 1;
+        if (runtime.model) {
+          runtime.model.removeFromParent();
+          disposeObjectResources(runtime.model);
+          runtime.model = undefined;
+        }
+      }
       for (const runtime of [...customRuntimes.values()]) {
         removeCustomRuntime(runtime);
       }
@@ -3205,6 +3709,9 @@ function DetailPanel({
 }) {
   const copy = COPY[locale];
   const panelStyle = { "--accent": asset.accent } as CSSProperties;
+  const relatedAssets = asset.related.flatMap((id) =>
+    Object.hasOwn(assetById, id) ? [assetById[id]] : [],
+  );
   return (
     <section
       className="detail-layer"
@@ -3325,21 +3832,21 @@ function DetailPanel({
 
           {asset.note && <blockquote>{asset.note}</blockquote>}
 
-          {asset.related.length > 0 && (
+          {relatedAssets.length > 0 && (
             <footer className="detail-footer">
               <div>
                 <p className="eyebrow">{copy.continueExploring}</p>
                 <h3>{copy.nextObject}</h3>
               </div>
               <div className="related-links">
-                {asset.related.slice(0, 2).map((id) => (
+                {relatedAssets.slice(0, 2).map((relatedAsset) => (
                   <button
                     type="button"
-                    key={id}
-                    onClick={() => onOpenRelated(id)}
+                    key={relatedAsset.id}
+                    onClick={() => onOpenRelated(relatedAsset.id)}
                   >
-                    <span>{assetById[id].objectLabel}</span>
-                    <small>{assetById[id].teaser}</small>
+                    <span>{relatedAsset.objectLabel}</span>
+                    <small>{relatedAsset.teaser}</small>
                     <i aria-hidden="true">↗</i>
                   </button>
                 ))}
@@ -3556,10 +4063,22 @@ export default function RoomExperience() {
   const [indexOpen, setIndexOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [resetSignal, setResetSignal] = useState(0);
+  const [modelLoadStates, setModelLoadStates] = useState<
+    Record<string, CustomModelLoadState>
+  >({});
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const openedFromRoomRef = useRef(false);
   const previousActiveRef = useRef<AssetId | null>(null);
+  const handleModelLoadState = useCallback(
+    (id: AssetId, state: CustomModelLoadState) => {
+      setModelLoadStates((current) => ({
+        ...current,
+        [id]: state,
+      }));
+    },
+    [],
+  );
   const copy = COPY[locale];
   const baseAssets =
     locale === "zh" ? PORTFOLIO_ASSETS : PORTFOLIO_ASSETS_EN;
@@ -3567,26 +4086,39 @@ export default function RoomExperience() {
     () => mergeProfile(locale, contentConfig),
     [contentConfig, locale],
   );
-  const coreAssets = useMemo(
+  const allCoreAssets = useMemo(
     () => mergeAssets(baseAssets, locale, contentConfig),
     [baseAssets, contentConfig, locale],
+  );
+  const sceneConfig = useMemo(
+    () => mergeSceneConfig(contentConfig),
+    [contentConfig],
+  );
+  const coreAssets = useMemo(
+    () =>
+      allCoreAssets.filter(
+        (asset) =>
+          isAssetId(asset.id) &&
+          isCoreSceneAssetEnabled(sceneConfig, asset.id),
+      ),
+    [allCoreAssets, sceneConfig],
   );
   const customAssets = useMemo(
     () =>
       mergeCustomSceneAssets(
         locale,
         contentConfig,
-        coreAssets.length + 1,
+        allCoreAssets.length + 1,
       ),
-    [contentConfig, coreAssets.length, locale],
+    [allCoreAssets.length, contentConfig, locale],
   );
   const assets = useMemo(
     () => [...coreAssets, ...customAssets],
     [coreAssets, customAssets],
   );
-  const sceneConfig = useMemo(
-    () => mergeSceneConfig(contentConfig),
-    [contentConfig],
+  const studioAssets = useMemo(
+    () => [...allCoreAssets, ...customAssets],
+    [allCoreAssets, customAssets],
   );
   const media = useMemo(
     () => mergeMedia(contentConfig),
@@ -3759,7 +4291,7 @@ export default function RoomExperience() {
 
   const openAsset = useCallback(
     (id: AssetId, source?: HTMLElement | null) => {
-      if (studioOpen) return;
+      if (studioOpen || !Object.hasOwn(assetById, id)) return;
       previousFocusRef.current =
         source ?? (document.activeElement as HTMLElement | null);
       openedFromRoomRef.current = readRoute() !== id;
@@ -3769,7 +4301,7 @@ export default function RoomExperience() {
       setHelpOpen(false);
       setActiveId(id);
     },
-    [readRoute, studioOpen, updateRoute],
+    [assetById, readRoute, studioOpen, updateRoute],
   );
 
   const closeAsset = useCallback(() => {
@@ -3783,6 +4315,7 @@ export default function RoomExperience() {
   }, [activeId, updateRoute]);
 
   useEffect(() => {
+    if (!contentLoaded) return;
     const handlePopState = () => {
       const next = readRoute();
       setLocale(readLocale());
@@ -3796,7 +4329,7 @@ export default function RoomExperience() {
       window.cancelAnimationFrame(initialFrame);
       window.removeEventListener("popstate", handlePopState);
     };
-  }, [readLocale, readRoute]);
+  }, [contentLoaded, readLocale, readRoute]);
 
   useEffect(() => {
     if (
@@ -3880,7 +4413,9 @@ export default function RoomExperience() {
       ? assetById[activeId]
       : null;
   const placementAssetLabel = scenePlacementEdit
-    ? assets.find((asset) => asset.id === scenePlacementEdit.assetId)
+    ? studioAssets.find(
+        (asset) => asset.id === scenePlacementEdit.assetId,
+      )
         ?.objectLabel ??
       sceneConfig.customAssets
         ?.find((asset) => asset.id === scenePlacementEdit.assetId)
@@ -3936,6 +4471,7 @@ export default function RoomExperience() {
           if (!studioOpen) openAsset(id);
         }}
         onHover={setHoveredId}
+        onModelLoadState={handleModelLoadState}
         onPlacementPreview={(edit) => {
           setScenePlacementEdit((current) =>
             current?.assetId === edit.assetId &&
@@ -4297,7 +4833,8 @@ export default function RoomExperience() {
         locale={locale}
         config={contentConfig}
         profile={profile}
-        assets={assets}
+        assets={studioAssets}
+        modelLoadStates={modelLoadStates}
         placementEdit={scenePlacementEdit}
         onChange={setContentConfig}
         onLocaleChange={changeLocale}

@@ -10,6 +10,7 @@ const { isAssetId, PORTFOLIO_ASSETS } = (await import(
 
 const {
   DEFAULT_SCENE_TRANSFORM,
+  isCoreSceneAssetEnabled,
   isValidContentCardImageSource,
   isValidContentCardLinkUrl,
   isValidSocialUrl,
@@ -453,6 +454,17 @@ test("keeps version-one scene data compatible through parse and merge", () => {
     JSON.stringify({
       ...emptyDocument,
       scene: {
+        disabledCoreAssets: [
+          "music",
+          "unknown",
+          "music",
+          "fitness",
+        ],
+        coreAssetModels: {
+          music: modelPath,
+          fitness: "https://example.com/model.glb",
+          unknown: modelPath,
+        },
         placements: {
           music: {
             position: [1, 2, 3],
@@ -485,6 +497,13 @@ test("keeps version-one scene data compatible through parse and merge", () => {
     rotation: [0, 45, 0],
     scale: [1, 1.25, 1],
   });
+  assert.deepEqual(parsed.scene?.disabledCoreAssets, [
+    "music",
+    "fitness",
+  ]);
+  assert.deepEqual(parsed.scene?.coreAssetModels, {
+    music: modelPath,
+  });
   assert.equal(parsed.scene?.customAssets?.[0]?.modelSrc, modelPath);
   assert.equal(parsed.scene?.customAssets?.[0]?.accent, "#A1B2C3");
   assert.equal(
@@ -493,6 +512,11 @@ test("keeps version-one scene data compatible through parse and merge", () => {
   );
 
   const detached = mergeSceneConfig(parsed);
+  detached.disabledCoreAssets?.push("reading");
+  if (detached.coreAssetModels) {
+    detached.coreAssetModels.music =
+      "/uploads/models/55555555-5555-4555-8555-555555555555.glb";
+  }
   detached.placements?.music?.position?.splice(0, 1, 40);
   detached.customAssets?.[0]?.transform.position.splice(0, 1, 40);
   if (detached.customAssets?.[0]?.content.zh) {
@@ -500,6 +524,13 @@ test("keeps version-one scene data compatible through parse and merge", () => {
   }
 
   assert.deepEqual(parsed.scene?.placements?.music?.position, [1, 2, 3]);
+  assert.deepEqual(parsed.scene?.disabledCoreAssets, [
+    "music",
+    "fitness",
+  ]);
+  assert.deepEqual(parsed.scene?.coreAssetModels, {
+    music: modelPath,
+  });
   assert.deepEqual(
     parsed.scene?.customAssets?.[0]?.transform.position,
     [2, 0, -1],
@@ -508,6 +539,26 @@ test("keeps version-one scene data compatible through parse and merge", () => {
     parsed.scene?.customAssets?.[0]?.content.zh?.objectLabel,
     "阅读灯",
   );
+});
+
+test("keeps disabled core definitions available for reactivation", () => {
+  const config = normalizeSiteContent({
+    ...emptyDocument,
+    scene: {
+      disabledCoreAssets: ["music"],
+      placements: {
+        music: {
+          position: [2, 0, -1],
+        },
+      },
+    },
+  });
+  const coreAssets = mergeAssets(PORTFOLIO_ASSETS, "zh", config);
+
+  assert.equal(coreAssets.some((asset) => asset.id === "music"), true);
+  assert.equal(isCoreSceneAssetEnabled(config.scene, "music"), false);
+  assert.equal(isCoreSceneAssetEnabled(config.scene, "reading"), true);
+  assert.deepEqual(config.scene?.placements?.music?.position, [2, 0, -1]);
 });
 
 test("clamps scene transforms, deduplicates ids, and rejects unsafe models", () => {

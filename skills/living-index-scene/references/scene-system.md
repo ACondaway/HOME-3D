@@ -15,6 +15,11 @@
 ## Transforms and behavior
 
 - Use relative `scene.placements[coreId]` overrides for built-in objects.
+- Use `scene.disabledCoreAssets` to deactivate built-in objects without
+  deleting their code definitions, content, or placements.
+- Use `scene.coreAssetModels[coreId]` for reversible GLB visual replacements.
+  The built-in ID, content, interaction, and placement remain authoritative;
+  clearing the path restores the native visual.
 - Use absolute `scene.customAssets[].transform` values for imported objects.
 - Keep positions within `[-50, 50]`, rotations within `[-360, 360]` degrees, and scales within `[0.05, 20]`.
 - Keep custom IDs unique and prefixed with `custom-`; keep at most 24 custom assets.
@@ -51,6 +56,9 @@
 - Keep geometry below the validator budgets, including 1 million triangles, 512 nodes, 512 primitives, 16 images, 8192 px per texture edge, 32 megapixels per texture, and 64 megapixels total.
 - Keep runtime same-origin fetch and size checks.
 - Preserve the wireframe placeholder for missing, invalid, empty, or failed models.
+- For a built-in replacement, keep the native visual or previous replacement
+  visible until the next GLB is parsed and compiled. Failure falls back to that
+  existing visual rather than a wireframe placeholder.
 
 ## Frequent failures
 

@@ -92,9 +92,9 @@ Objects can be positioned through numeric controls or confirmed drag sessions ac
 
 Fork the room, describe what you want to change, and let a coding agent work from the repository’s own skill pack. The included skills capture the content schema, bilingual editing model, Three.js scene conventions, asset safety rules, validation gates, and push-to-deploy workflow—so DIY starts with intent instead of architectural archaeology.
 
-| [`$living-index-content`](./skills/living-index-content/SKILL.md) | [`$living-index-scene`](./skills/living-index-scene/SKILL.md) | [`$living-index-developer`](./skills/living-index-developer/SKILL.md) |
-|---|---|---|
-| Profile, media, photography, Spotlight, social links, and composable cards. | Timezone lighting, object placement, GLB assets, and decorative/interactive behavior. | New framework capabilities, accessible interactions, tests, and safe delivery. |
+| [`$living-index-content`](./skills/living-index-content/SKILL.md) | [`$living-index-scene`](./skills/living-index-scene/SKILL.md) | [`$living-index-native-assets`](./skills/living-index-native-assets/SKILL.md) | [`$living-index-developer`](./skills/living-index-developer/SKILL.md) |
+|---|---|---|---|
+| Profile, media, photography, Spotlight, social links, and composable cards. | Timezone lighting, placement, GLB assets, and scene behavior. | Lightweight furniture, props, lights, and decorations generated directly with Three.js. | New framework capabilities, accessible interactions, tests, and safe delivery. |
 
 Start with the repository’s [coding agent guide](./AGENTS.md). Every skill is plain Markdown, inspectable, forkable, and MIT-licensed.
 
@@ -107,7 +107,8 @@ Start with the repository’s [coding agent guide](./AGENTS.md). Every skill is 
 - 📷 **Photography with focus** — every image remains visible, while spotlight images receive a dedicated editorial treatment.
 - 🧱 **Composable content** — text, media, and link cards can be combined into standard, wide, or full-width layouts.
 - 🧭 **Direct scene editing** — move, raise, rotate, scale, and confirm object placement without leaving the visual editor.
-- 📦 **Bring your own assets** — validated self-contained GLB models can be added as decoration or interactive content.
+- 📦 **Bring your own assets** — validated self-contained GLBs can be added as new objects or used as reversible visual replacements for built-in objects.
+- 🧰 **Generate lightweight props in code** — coding agents can compose simple light-reactive assets from the room’s native Three.js primitives instead of requiring a GLB.
 - ♿ **An equal non-3D route** — semantic navigation, keyboard support, reduced motion, and graceful WebGL fallback are part of the core experience.
 
 ## ⚙️ Built with

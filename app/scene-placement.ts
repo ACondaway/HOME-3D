@@ -1,6 +1,7 @@
 import {
   DEFAULT_SCENE_TRANSFORM,
   SCENE_TRANSFORM_LIMITS,
+  isCoreSceneAssetEnabled,
   type SceneVector3,
   type SiteContentConfig,
 } from "./content-config.ts";
@@ -138,6 +139,7 @@ export function beginScenePlacementEdit(
   assetId: string,
 ): ScenePlacementEdit | null {
   if (isAssetId(assetId)) {
+    if (!isCoreSceneAssetEnabled(config.scene, assetId)) return null;
     const position =
       config.scene?.placements?.[assetId]?.position ??
       DEFAULT_SCENE_TRANSFORM.position;
