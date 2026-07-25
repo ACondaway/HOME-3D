@@ -102,6 +102,16 @@ Fork the room, describe what you want to change, and let a coding agent work fro
 
 Start with the repository’s [coding agent guide](./AGENTS.md). Every skill is plain Markdown, inspectable, forkable, and MIT-licensed.
 
+## 🌱 Where this could grow
+
+The Living Index begins as one person’s digital home, but its longer-term ambition is to help many more people build spaces of their own—and eventually let those spaces form a community without losing their individuality.
+
+| 🏡 More personal spaces | 🫂 Shared-space communities | 🌐 An open creative ecosystem |
+|---|---|---|
+| Make creation approachable through guided editing, reusable room templates, starter themes, and agent-assisted customization—even for people who do not write code. | Let people visit, connect, and co-create across personal rooms: shared exhibitions, collaborative spaces, community neighborhoods, guestbooks, and small gatherings built around common interests. | Grow a community-owned library of themes, native props, GLB assets, content modules, and Agent Skills that can be remixed while preserving attribution, portability, privacy, and personal ownership. |
+
+The goal is not to make every space look the same. It is to create shared foundations that let more people express who they are, decide what remains private, and bring their individual rooms into a larger constellation when they choose.
+
 ## 🧩 Highlights
 
 - 🏠 **All-in-One personal homepage** — bring work, life, hobbies, projects, memories, social presence, and future plans into one coherent digital home.
