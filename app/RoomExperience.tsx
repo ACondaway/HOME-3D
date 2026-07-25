@@ -60,7 +60,9 @@ import {
   beginScenePlacementEdit,
   commitScenePlacementEdit,
   constrainScenePlacementPosition,
+  constrainScenePlacementRotation,
   type ScenePlacementEdit,
+  type ScenePlacementMode,
 } from "./scene-placement.ts";
 
 type Locale = ContentLocale;
@@ -286,6 +288,7 @@ interface CustomSceneRuntime {
 }
 
 const DEGREES_TO_RADIANS = Math.PI / 180;
+const MIN_PLACEMENT_ROTATION_RAY_DOT = 0.025;
 const MAX_RUNTIME_MODEL_BYTES = 24 * 1024 * 1024;
 const FALLBACK_MODEL_BOUNDS = new THREE.Box3(
   new THREE.Vector3(-0.5, 0, -0.5),
@@ -1514,6 +1517,12 @@ function RoomScene({
     let placementEditState: ScenePlacementEdit | null = null;
     let placementDragPointerId: number | null = null;
     let placementDragRoot: THREE.Object3D | null = null;
+    let placementDragMode: ScenePlacementMode | null = null;
+    let placementDragStartEdit: ScenePlacementEdit | null = null;
+    let placementHeightUsesPlane = false;
+    let placementRotationUsesPlane = false;
+    let placementRotationDegrees = 0;
+    let placementRotationLastClientX = 0;
     let isVisible = !document.hidden;
     let lastFrame = performance.now();
     let elapsed = 0;
@@ -1543,9 +1552,19 @@ function RoomScene({
     const placementPlaneNormal = new THREE.Vector3(0, 1, 0);
     const placementNormalMatrix = new THREE.Matrix3();
     const placementPlaneHit = new THREE.Vector3();
+    const placementStartHitLocal = new THREE.Vector3();
+    const placementCurrentHitLocal = new THREE.Vector3();
     const placementRootWorld = new THREE.Vector3();
+    const placementParentWorld = new THREE.Matrix4();
+    const placementParentWorldInverse = new THREE.Matrix4();
+    const placementRootStartLocal = new THREE.Vector3();
     const placementLocalPosition = new THREE.Vector3();
     const placementGrabOffset = new THREE.Vector3();
+    const placementAxisWorld = new THREE.Vector3();
+    const placementAxisScale = new THREE.Vector3();
+    const placementRadial = new THREE.Vector3();
+    const placementLastRadial = new THREE.Vector3();
+    const placementCross = new THREE.Vector3();
 
     const applyLighting = () => {
       const lighting = getSolarLightingState(
@@ -1951,6 +1970,7 @@ function RoomScene({
 
     const applyPlacementPreview = (edit: ScenePlacementEdit) => {
       const position = edit.position;
+      const rotation = edit.rotation;
       if (isAssetId(edit.assetId)) {
         const runtime = coreRuntimes.get(edit.assetId);
         if (!runtime) return false;
@@ -1959,12 +1979,22 @@ function RoomScene({
           runtime.defaultPosition.y + position[1],
           runtime.defaultPosition.z + position[2],
         );
+        runtime.root.rotation.set(
+          runtime.defaultRotation.x + rotation[0] * DEGREES_TO_RADIANS,
+          runtime.defaultRotation.y + rotation[1] * DEGREES_TO_RADIANS,
+          runtime.defaultRotation.z + rotation[2] * DEGREES_TO_RADIANS,
+        );
       } else {
         const runtime = customRuntimes.get(
           edit.assetId as CustomSceneAsset["id"],
         );
         if (!runtime) return false;
         runtime.root.position.set(...position);
+        runtime.root.rotation.set(
+          rotation[0] * DEGREES_TO_RADIANS,
+          rotation[1] * DEGREES_TO_RADIANS,
+          rotation[2] * DEGREES_TO_RADIANS,
+        );
       }
       scene.updateMatrixWorld(true);
       if (activeMarkerId === edit.assetId) showMarker(edit.assetId);
@@ -1994,11 +2024,50 @@ function RoomScene({
       scene.updateMatrixWorld(true);
     };
 
-    const finishPlacementDrag = () => {
+    const clonePlacementEdit = (
+      edit: ScenePlacementEdit,
+    ): ScenePlacementEdit => ({
+      ...edit,
+      initialPosition: [...edit.initialPosition],
+      initialRotation: [...edit.initialRotation],
+      position: [...edit.position],
+      rotation: [...edit.rotation],
+    });
+
+    const placementCursor = (
+      mode: ScenePlacementMode,
+      dragging = false,
+    ) => {
+      if (mode === "height") return "ns-resize";
+      if (mode === "rotation") return "ew-resize";
+      return dragging ? "grabbing" : "move";
+    };
+
+    const emitPlacementPreview = (edit: ScenePlacementEdit) => {
+      applyPlacementPreview(edit);
+      showMarker(edit.assetId);
+      onPlacementPreviewRef.current(clonePlacementEdit(edit));
+    };
+
+    const finishPlacementDrag = (rollback = false) => {
       const capturedPointerId = placementDragPointerId;
+      const rollbackEdit = placementDragStartEdit;
       placementDragPointerId = null;
       placementDragRoot = null;
+      placementDragMode = null;
+      placementDragStartEdit = null;
+      placementHeightUsesPlane = false;
+      placementRotationUsesPlane = false;
       delete host.dataset.objectDragging;
+      if (
+        rollback &&
+        rollbackEdit &&
+        placementEditState?.assetId === rollbackEdit.assetId &&
+        placementEditState.mode === rollbackEdit.mode
+      ) {
+        placementEditState = clonePlacementEdit(rollbackEdit);
+        emitPlacementPreview(placementEditState);
+      }
       if (
         capturedPointerId !== null &&
         renderer.domElement.hasPointerCapture(capturedPointerId)
@@ -2007,7 +2076,7 @@ function RoomScene({
       }
       controls.enabled = focusedId === null;
       renderer.domElement.style.cursor = placementEditState
-        ? "grab"
+        ? placementCursor(placementEditState.mode)
         : hoveredId
           ? "pointer"
           : "grab";
@@ -2032,19 +2101,21 @@ function RoomScene({
       const previousEdit = placementEditState;
       const targetChanged =
         previousEdit?.assetId !== nextEdit?.assetId;
+      const modeChanged =
+        previousEdit?.mode !== nextEdit?.mode;
 
-      if (targetChanged && placementDragPointerId !== null) {
-        finishPlacementDrag();
+      if (
+        (targetChanged || modeChanged) &&
+        placementDragPointerId !== null
+      ) {
+        finishPlacementDrag(targetChanged);
       }
       if (previousEdit && targetChanged) {
         restorePlacement(previousEdit.assetId);
       }
 
       placementEditState = nextEdit
-        ? {
-            assetId: nextEdit.assetId,
-            position: [...nextEdit.position],
-          }
+        ? clonePlacementEdit(nextEdit)
         : null;
 
       if (placementEditState) {
@@ -2056,8 +2127,12 @@ function RoomScene({
         }
         setHovered(null);
         showMarker(placementEditState.assetId);
-        renderer.domElement.style.cursor = "grab";
+        host.dataset.placementMode = placementEditState.mode;
+        renderer.domElement.style.cursor = placementCursor(
+          placementEditState.mode,
+        );
       } else {
+        delete host.dataset.placementMode;
         const markerId = focusedId ?? hoveredId;
         showMarker(markerId);
         renderer.domElement.style.cursor = hoveredId ? "pointer" : "grab";
@@ -2187,26 +2262,98 @@ function RoomScene({
       const root = placementTargetAtPointer(event);
       if (!root) return false;
 
+      scene.updateMatrixWorld(true);
+      root.parent?.updateWorldMatrix(true, false);
+      placementParentWorld.identity();
+      if (root.parent) placementParentWorld.copy(root.parent.matrixWorld);
+      placementParentWorldInverse.copy(placementParentWorld).invert();
+      placementRootStartLocal.copy(root.position);
       root.getWorldPosition(placementRootWorld);
-      placementPlaneNormal.set(0, 1, 0);
-      if (root.parent) {
-        root.parent.updateWorldMatrix(true, false);
-        placementNormalMatrix.getNormalMatrix(root.parent.matrixWorld);
+      placementAxisScale
+        .setFromMatrixColumn(placementParentWorld, 1);
+      placementAxisWorld.copy(placementAxisScale).normalize();
+      pointerStart.set(event.clientX, event.clientY);
+      placementDragMode = placementEditState.mode;
+      placementDragStartEdit = clonePlacementEdit(placementEditState);
+      placementHeightUsesPlane = false;
+      placementRotationUsesPlane = false;
+      placementRotationDegrees = 0;
+      placementRotationLastClientX = event.clientX;
+
+      if (placementDragMode === "plane") {
+        placementPlaneNormal.set(0, 1, 0);
+        placementNormalMatrix.getNormalMatrix(placementParentWorld);
         placementPlaneNormal
           .applyMatrix3(placementNormalMatrix)
           .normalize();
-      }
-      placementPlane.setFromNormalAndCoplanarPoint(
-        placementPlaneNormal,
-        placementRootWorld,
-      );
-      if (!raycaster.ray.intersectPlane(placementPlane, placementPlaneHit)) {
-        return false;
+        placementPlane.setFromNormalAndCoplanarPoint(
+          placementPlaneNormal,
+          placementRootWorld,
+        );
+        if (!raycaster.ray.intersectPlane(placementPlane, placementPlaneHit)) {
+          placementDragMode = null;
+          placementDragStartEdit = null;
+          return false;
+        }
+        placementStartHitLocal
+          .copy(placementPlaneHit)
+          .applyMatrix4(placementParentWorldInverse);
+        placementGrabOffset
+          .copy(placementRootStartLocal)
+          .sub(placementStartHitLocal);
+      } else if (placementDragMode === "height") {
+        placementPlaneNormal
+          .copy(raycaster.ray.direction)
+          .addScaledVector(
+            placementAxisWorld,
+            -raycaster.ray.direction.dot(placementAxisWorld),
+          );
+        if (placementPlaneNormal.lengthSq() > 1e-6) {
+          placementPlaneNormal.normalize();
+          placementPlane.setFromNormalAndCoplanarPoint(
+            placementPlaneNormal,
+            placementRootWorld,
+          );
+          if (
+            raycaster.ray.intersectPlane(
+              placementPlane,
+              placementPlaneHit,
+            )
+          ) {
+            placementStartHitLocal
+              .copy(placementPlaneHit)
+              .applyMatrix4(placementParentWorldInverse);
+            placementHeightUsesPlane = true;
+          }
+        }
+      } else {
+        placementPlane.setFromNormalAndCoplanarPoint(
+          placementAxisWorld,
+          placementRootWorld,
+        );
+        if (
+          Math.abs(
+            raycaster.ray.direction.dot(placementAxisWorld),
+          ) >= MIN_PLACEMENT_ROTATION_RAY_DOT &&
+          raycaster.ray.intersectPlane(
+            placementPlane,
+            placementPlaneHit,
+          )
+        ) {
+          placementLastRadial
+            .copy(placementPlaneHit)
+            .sub(placementRootWorld);
+          placementLastRadial.addScaledVector(
+            placementAxisWorld,
+            -placementLastRadial.dot(placementAxisWorld),
+          );
+          if (placementLastRadial.lengthSq() > 1e-5) {
+            placementLastRadial.normalize();
+            placementRotationUsesPlane = true;
+          }
+        }
       }
 
-      placementGrabOffset
-        .copy(placementRootWorld)
-        .sub(placementPlaneHit);
       placementDragPointerId = event.pointerId;
       placementDragRoot = root;
       pointerId = null;
@@ -2215,7 +2362,10 @@ function RoomScene({
       clearOrbitMomentum();
       controls.enabled = false;
       host.dataset.objectDragging = "true";
-      renderer.domElement.style.cursor = "grabbing";
+      renderer.domElement.style.cursor = placementCursor(
+        placementEditState.mode,
+        true,
+      );
       renderer.domElement.focus({ preventScroll: true });
       renderer.domElement.setPointerCapture(event.pointerId);
       showMarker(placementEditState.assetId);
@@ -2228,59 +2378,179 @@ function RoomScene({
       if (
         event.pointerId !== placementDragPointerId ||
         !placementEditState ||
-        !placementDragRoot
+        !placementDragRoot ||
+        !placementDragMode ||
+        !placementDragStartEdit
       ) {
         return false;
       }
 
       setPointer(event);
       raycaster.setFromCamera(pointer, camera);
-      if (!raycaster.ray.intersectPlane(placementPlane, placementPlaneHit)) {
-        return true;
+      const currentPosition = placementEditState.position;
+      const currentRotation = placementEditState.rotation;
+      let position = currentPosition;
+      let rotation = currentRotation;
+
+      if (placementDragMode === "plane") {
+        if (
+          !raycaster.ray.intersectPlane(placementPlane, placementPlaneHit)
+        ) {
+          return true;
+        }
+        placementLocalPosition
+          .copy(placementPlaneHit)
+          .applyMatrix4(placementParentWorldInverse)
+          .add(placementGrabOffset);
+        const candidate: [number, number, number] = isAssetId(
+          placementEditState.assetId,
+        )
+          ? [
+              placementLocalPosition.x -
+                (coreRuntimes.get(placementEditState.assetId)
+                  ?.defaultPosition.x ?? 0),
+              currentPosition[1],
+              placementLocalPosition.z -
+                (coreRuntimes.get(placementEditState.assetId)
+                  ?.defaultPosition.z ?? 0),
+            ]
+          : [
+              placementLocalPosition.x,
+              currentPosition[1],
+              placementLocalPosition.z,
+            ];
+        const constrainedPosition = constrainScenePlacementPosition(
+          candidate,
+          currentPosition,
+        );
+        position = [
+          constrainedPosition[0],
+          currentPosition[1],
+          constrainedPosition[2],
+        ];
+      } else if (placementDragMode === "height") {
+        let desiredLocalY: number;
+        if (
+          placementHeightUsesPlane &&
+          raycaster.ray.intersectPlane(
+            placementPlane,
+            placementPlaneHit,
+          )
+        ) {
+          placementCurrentHitLocal
+            .copy(placementPlaneHit)
+            .applyMatrix4(placementParentWorldInverse);
+          desiredLocalY =
+            placementRootStartLocal.y +
+            placementCurrentHitLocal.y -
+            placementStartHitLocal.y;
+        } else {
+          const rect = renderer.domElement.getBoundingClientRect();
+          const distance = camera.position.distanceTo(placementRootWorld);
+          const worldUnitsPerPixel =
+            (2 *
+              distance *
+              Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) /
+            Math.max(rect.height, 1);
+          desiredLocalY =
+            placementRootStartLocal.y -
+            ((event.clientY - pointerStart.y) * worldUnitsPerPixel) /
+              Math.max(placementAxisScale.length(), 1e-4);
+        }
+        const y = isAssetId(placementEditState.assetId)
+          ? desiredLocalY -
+            (coreRuntimes.get(placementEditState.assetId)
+              ?.defaultPosition.y ?? 0)
+          : desiredLocalY;
+        const constrainedPosition = constrainScenePlacementPosition(
+          [currentPosition[0], y, currentPosition[2]],
+          currentPosition,
+        );
+        position = [
+          currentPosition[0],
+          constrainedPosition[1],
+          currentPosition[2],
+        ];
+      } else {
+        if (placementRotationUsesPlane) {
+          if (
+            Math.abs(
+              raycaster.ray.direction.dot(placementAxisWorld),
+            ) < MIN_PLACEMENT_ROTATION_RAY_DOT ||
+            !raycaster.ray.intersectPlane(
+              placementPlane,
+              placementPlaneHit,
+            )
+          ) {
+            placementRotationUsesPlane = false;
+          } else {
+            placementRadial
+              .copy(placementPlaneHit)
+              .sub(placementRootWorld);
+            placementRadial.addScaledVector(
+              placementAxisWorld,
+              -placementRadial.dot(placementAxisWorld),
+            );
+            if (placementRadial.lengthSq() > 1e-5) {
+              placementRadial.normalize();
+              placementCross.crossVectors(
+                placementLastRadial,
+                placementRadial,
+              );
+              placementRotationDegrees += THREE.MathUtils.radToDeg(
+                Math.atan2(
+                  placementAxisWorld.dot(placementCross),
+                  THREE.MathUtils.clamp(
+                    placementLastRadial.dot(placementRadial),
+                    -1,
+                    1,
+                  ),
+                ),
+              );
+              placementLastRadial.copy(placementRadial);
+            } else {
+              placementRotationUsesPlane = false;
+            }
+          }
+        }
+        if (!placementRotationUsesPlane) {
+          placementRotationDegrees +=
+            (event.clientX - placementRotationLastClientX) * 0.35;
+        }
+        placementRotationLastClientX = event.clientX;
+        const yaw = event.shiftKey
+          ? Math.round(
+              (placementDragStartEdit.rotation[1] +
+                placementRotationDegrees) /
+                15,
+            ) * 15
+          : placementDragStartEdit.rotation[1] +
+            placementRotationDegrees;
+        const constrainedRotation = constrainScenePlacementRotation(
+          [currentRotation[0], yaw, currentRotation[2]],
+          currentRotation,
+        );
+        rotation = [
+          currentRotation[0],
+          constrainedRotation[1],
+          currentRotation[2],
+        ];
       }
 
-      placementLocalPosition
-        .copy(placementPlaneHit)
-        .add(placementGrabOffset);
-      placementDragRoot.parent?.worldToLocal(placementLocalPosition);
-
-      const currentPosition = placementEditState.position;
-      const candidate: [number, number, number] = isAssetId(
-        placementEditState.assetId,
-      )
-        ? [
-            placementLocalPosition.x -
-              (coreRuntimes.get(placementEditState.assetId)
-                ?.defaultPosition.x ?? 0),
-            currentPosition[1],
-            placementLocalPosition.z -
-              (coreRuntimes.get(placementEditState.assetId)
-                ?.defaultPosition.z ?? 0),
-          ]
-        : [
-            placementLocalPosition.x,
-            currentPosition[1],
-            placementLocalPosition.z,
-          ];
-      const position = constrainScenePlacementPosition(
-        candidate,
-        currentPosition,
-      );
       if (
         position[0] !== currentPosition[0] ||
         position[1] !== currentPosition[1] ||
-        position[2] !== currentPosition[2]
+        position[2] !== currentPosition[2] ||
+        rotation[0] !== currentRotation[0] ||
+        rotation[1] !== currentRotation[1] ||
+        rotation[2] !== currentRotation[2]
       ) {
         placementEditState = {
-          assetId: placementEditState.assetId,
+          ...placementEditState,
           position,
+          rotation,
         };
-        applyPlacementPreview(placementEditState);
-        showMarker(placementEditState.assetId);
-        onPlacementPreviewRef.current({
-          assetId: placementEditState.assetId,
-          position: [...placementEditState.position],
-        });
+        emitPlacementPreview(placementEditState);
       }
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -2314,7 +2584,7 @@ function RoomScene({
       if (event.pointerType === "mouse" && pointerId === null) {
         if (placementEditState) {
           renderer.domElement.style.cursor = placementTargetAtPointer(event)
-            ? "move"
+            ? placementCursor(placementEditState.mode)
             : "grab";
         } else {
           setHovered(pick(event));
@@ -2351,7 +2621,7 @@ function RoomScene({
     const handlePointerCancel = (event: PointerEvent) => {
       if (event.pointerId === placementDragPointerId) {
         event.stopImmediatePropagation();
-        finishPlacementDrag();
+        finishPlacementDrag(true);
         return;
       }
       if (event.pointerId === pointerId) handlePointerLeave();
@@ -2359,11 +2629,22 @@ function RoomScene({
 
     const handleLostPointerCapture = (event: PointerEvent) => {
       if (event.pointerId === placementDragPointerId) {
-        finishPlacementDrag();
+        finishPlacementDrag(true);
       }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      const isCameraShortcut =
+        event.key.toLowerCase() === "r" ||
+        event.key === "ArrowLeft" ||
+        event.key === "ArrowRight" ||
+        event.key === "+" ||
+        event.key === "=" ||
+        event.key === "-";
+      if (placementDragPointerId !== null && isCameraShortcut) {
+        event.preventDefault();
+        return;
+      }
       if (event.key.toLowerCase() === "r") {
         event.preventDefault();
         handleRef.current?.reset();
@@ -3449,6 +3730,15 @@ export default function RoomExperience() {
     setScenePlacementEdit(null);
   }, []);
 
+  const changeScenePlacementMode = useCallback(
+    (mode: ScenePlacementMode) => {
+      setScenePlacementEdit((current) =>
+        current ? { ...current, mode } : current,
+      );
+    },
+    [],
+  );
+
   const confirmScenePlacementEdit = useCallback(() => {
     if (!scenePlacementEdit) return;
     setContentConfig((current) =>
@@ -3597,6 +3887,25 @@ export default function RoomExperience() {
         ?.content[locale]?.objectLabel ??
       (locale === "zh" ? "选中物体" : "Selected object")
     : "";
+  const placementModeCopy = scenePlacementEdit
+    ? (locale === "zh"
+        ? {
+            plane: ["平面 X / Z", "沿地面拖动，只改变 X / Z。"],
+            height: ["高度 Y", "上下拖动调整高度 Y。"],
+            rotation: [
+              "方向旋转",
+              "绕 Y 轴拖动改变物体朝向；按住 Shift 可吸附到 15°。",
+            ],
+          }
+        : {
+            plane: ["Floor X / Z", "Drag along the floor to change X / Z."],
+            height: ["Height Y", "Drag up or down to adjust height Y."],
+            rotation: [
+              "Heading",
+              "Drag around Y to change the heading; hold Shift to snap to 15°.",
+            ],
+          })[scenePlacementEdit.mode]
+    : null;
 
   return (
     <main
@@ -3629,7 +3938,10 @@ export default function RoomExperience() {
         onHover={setHoveredId}
         onPlacementPreview={(edit) => {
           setScenePlacementEdit((current) =>
-            current?.assetId === edit.assetId ? edit : current,
+            current?.assetId === edit.assetId &&
+            current.mode === edit.mode
+              ? edit
+              : current,
           );
         }}
         onReady={() => setReady(true)}
@@ -3641,22 +3953,73 @@ export default function RoomExperience() {
           <div>
             <span>
               {locale === "zh" ? "拖动摆放模式" : "Drag placement mode"}
+              {placementModeCopy ? ` · ${placementModeCopy[0]}` : ""}
             </span>
             <strong>{placementAssetLabel}</strong>
-            <small>
-              {locale === "zh"
-                ? "拖动物体调整 X / Z，确认后才会保存"
-                : "Drag to adjust X / Z; the change saves only after confirmation"}
-            </small>
+            <small>{placementModeCopy?.[1]}</small>
           </div>
-          <code>
-            X {scenePlacementEdit.position[0].toFixed(2)} · Y{" "}
-            {scenePlacementEdit.position[1].toFixed(2)} · Z{" "}
-            {scenePlacementEdit.position[2].toFixed(2)}
+          <div
+            className="scene-placement-hud-modes"
+            role="group"
+            aria-label={locale === "zh" ? "拖动方式" : "Drag mode"}
+          >
+            {(["plane", "height", "rotation"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={scenePlacementEdit.mode === mode ? "is-active" : ""}
+                aria-pressed={scenePlacementEdit.mode === mode}
+                onClick={() => changeScenePlacementMode(mode)}
+              >
+                {
+                  (locale === "zh"
+                    ? {
+                        plane: "平面",
+                        height: "高度",
+                        rotation: "方向",
+                      }
+                    : {
+                        plane: "Floor",
+                        height: "Height",
+                        rotation: "Heading",
+                      })[mode]
+                }
+              </button>
+            ))}
+          </div>
+          <code className="scene-placement-hud-coordinates">
+            <span
+              className={
+                scenePlacementEdit.mode === "plane" ? "is-affected" : ""
+              }
+            >
+              X {scenePlacementEdit.position[0].toFixed(2)}
+            </span>
+            <span
+              className={
+                scenePlacementEdit.mode === "height" ? "is-affected" : ""
+              }
+            >
+              Y {scenePlacementEdit.position[1].toFixed(2)}
+            </span>
+            <span
+              className={
+                scenePlacementEdit.mode === "plane" ? "is-affected" : ""
+              }
+            >
+              Z {scenePlacementEdit.position[2].toFixed(2)}
+            </span>
+            <span
+              className={
+                scenePlacementEdit.mode === "rotation" ? "is-affected" : ""
+              }
+            >
+              Ry {scenePlacementEdit.rotation[1].toFixed(1)}°
+            </span>
           </code>
           <div className="scene-placement-hud-actions">
             <button type="button" onClick={confirmScenePlacementEdit}>
-              {locale === "zh" ? "确认位置" : "Confirm position"}
+              {locale === "zh" ? "确认全部摆放" : "Confirm all"}
             </button>
             <button type="button" onClick={cancelScenePlacementEdit}>
               {locale === "zh" ? "取消" : "Cancel"}
@@ -3943,6 +4306,7 @@ export default function RoomExperience() {
           setStudioOpen(false);
         }}
         onPlacementEditStart={startScenePlacementEdit}
+        onPlacementModeChange={changeScenePlacementMode}
         onPlacementEditConfirm={confirmScenePlacementEdit}
         onPlacementEditCancel={cancelScenePlacementEdit}
         onReset={() => {

@@ -37,7 +37,10 @@ import {
 } from "./portfolio-data";
 import { PORTFOLIO_ASSETS_EN } from "./portfolio-data-en";
 import { ContentCardListEditor } from "./ContentCardEditor";
-import type { ScenePlacementEdit } from "./scene-placement";
+import type {
+  ScenePlacementEdit,
+  ScenePlacementMode,
+} from "./scene-placement";
 
 export interface ContentStudioProps {
   open: boolean;
@@ -50,6 +53,7 @@ export interface ContentStudioProps {
   onLocaleChange: (locale: ContentLocale) => void;
   onClose: () => void;
   onPlacementEditStart: (assetId: string) => void;
+  onPlacementModeChange: (mode: ScenePlacementMode) => void;
   onPlacementEditConfirm: () => void;
   onPlacementEditCancel: () => void;
   onReset?: () => void;
@@ -363,6 +367,7 @@ export function ContentStudio({
   onLocaleChange,
   onClose,
   onPlacementEditStart,
+  onPlacementModeChange,
   onPlacementEditConfirm,
   onPlacementEditCancel,
   onReset,
@@ -1566,6 +1571,7 @@ export function ContentStudio({
                   setScenePreview(true);
                   onPlacementEditStart(assetId);
                 }}
+                onPlacementModeChange={onPlacementModeChange}
                 onPlacementEditConfirm={onPlacementEditConfirm}
                 onPlacementEditCancel={onPlacementEditCancel}
               />

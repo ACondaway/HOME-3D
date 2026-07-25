@@ -100,6 +100,11 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(room, /lostpointercapture/);
   assert.match(room, /clearOrbitMomentum/);
   assert.match(room, /getNormalMatrix/);
+  assert.match(room, /placementParentWorldInverse/);
+  assert.match(room, /constrainScenePlacementRotation/);
+  assert.match(room, /placementRotationDegrees/);
+  assert.match(room, /MIN_PLACEMENT_ROTATION_RAY_DOT/);
+  assert.match(room, /isCameraShortcut/);
   assert.match(room, /onPlacementPreview/);
   assert.match(room, /scene-placement-hud/);
   assert.match(room, /asset\.behavior !== "interactive"/);
@@ -149,6 +154,8 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(sceneStudio, /updateCorePlacement/);
   assert.match(sceneStudio, /<TransformEditor/);
   assert.match(sceneStudio, /studio-placement-toolbar/);
+  assert.match(sceneStudio, /studio-placement-modes/);
+  assert.match(sceneStudio, /"plane", "height", "rotation"/);
   assert.match(sceneStudio, /onPlacementEditConfirm/);
   assert.match(sceneStudio, /value="decorative"/);
   assert.match(sceneStudio, /value="interactive"/);
@@ -157,6 +164,8 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(scenePlacement, /beginScenePlacementEdit/);
   assert.match(scenePlacement, /commitScenePlacementEdit/);
   assert.match(scenePlacement, /constrainScenePlacementPosition/);
+  assert.match(scenePlacement, /constrainScenePlacementRotation/);
+  assert.match(scenePlacement, /initialRotation/);
   assert.match(contentCardEditor, /const CARD_KINDS =/);
   assert.match(contentCardEditor, /"text"/);
   assert.match(contentCardEditor, /"media"/);

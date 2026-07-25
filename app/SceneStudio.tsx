@@ -28,7 +28,10 @@ import {
   type PortfolioAsset,
 } from "./portfolio-data";
 import { ContentCardListEditor } from "./ContentCardEditor";
-import type { ScenePlacementEdit } from "./scene-placement";
+import type {
+  ScenePlacementEdit,
+  ScenePlacementMode,
+} from "./scene-placement";
 
 interface SceneStudioProps {
   locale: ContentLocale;
@@ -38,6 +41,7 @@ interface SceneStudioProps {
   placementEdit: ScenePlacementEdit | null;
   onChange: Dispatch<SetStateAction<SiteContentConfig>>;
   onPlacementEditStart: (assetId: string) => void;
+  onPlacementModeChange: (mode: ScenePlacementMode) => void;
   onPlacementEditConfirm: () => void;
   onPlacementEditCancel: () => void;
 }
@@ -322,6 +326,7 @@ export function SceneStudio({
   placementEdit,
   onChange,
   onPlacementEditStart,
+  onPlacementModeChange,
   onPlacementEditConfirm,
   onPlacementEditCancel,
 }: SceneStudioProps) {
@@ -342,11 +347,24 @@ export function SceneStudio({
           dragPlacement: "拖动摆放",
           dragPlacementActive: "正在摆放",
           dragPlacementHelp:
-            "进入后，在房间画面中直接拖动物体。拖动只改变 X / Z；确认或取消后，可继续用数值设置高度、旋转和缩放。",
-          dragPlacementArmed:
-            "已进入摆放模式。拖动选中物体预览新位置，然后确认或取消。",
-          confirmPlacement: "确认位置",
-          cancelPlacement: "取消摆放",
+            "进入后，可切换平面、高度和方向三种拖动方式；确认或取消后，可继续使用完整数值设置。",
+          dragMode: "拖动方式",
+          dragModes: {
+            plane: {
+              label: "平面 X / Z",
+              help: "沿地面拖动，只改变 X / Z。",
+            },
+            height: {
+              label: "高度 Y",
+              help: "上下拖动调整高度 Y。",
+            },
+            rotation: {
+              label: "方向旋转",
+              help: "绕 Y 轴拖动改变物体朝向；按住 Shift 可吸附到 15°。",
+            },
+          },
+          confirmPlacement: "确认全部摆放",
+          cancelPlacement: "取消全部预览",
           placementCoordinates: "预览坐标",
           reset: "恢复原始位置",
           model: "3D 模型",
@@ -403,11 +421,25 @@ export function SceneStudio({
           dragPlacement: "Drag to place",
           dragPlacementActive: "Placing object",
           dragPlacementHelp:
-            "Drag the object directly in the room view. Dragging changes X / Z only; after confirming or cancelling, use the numeric controls for height, rotation, and scale.",
-          dragPlacementArmed:
-            "Placement mode is active. Drag the selected object to preview its new position, then confirm or cancel.",
-          confirmPlacement: "Confirm position",
-          cancelPlacement: "Cancel placement",
+            "Switch between floor, height, and heading drag modes in the room view; confirm or cancel before returning to the full numeric controls.",
+          dragMode: "Drag mode",
+          dragModes: {
+            plane: {
+              label: "Floor X / Z",
+              help: "Drag along the floor to change X / Z only.",
+            },
+            height: {
+              label: "Height Y",
+              help: "Drag up or down to adjust height Y.",
+            },
+            rotation: {
+              label: "Heading",
+              help:
+                "Drag around Y to change the heading; hold Shift to snap to 15°.",
+            },
+          },
+          confirmPlacement: "Confirm all placement",
+          cancelPlacement: "Cancel all previews",
           placementCoordinates: "Preview coordinates",
           reset: "Restore original placement",
           model: "3D model",
@@ -624,7 +656,9 @@ export function SceneStudio({
         : (corePlacement?.position ?? DEFAULT_SCENE_TRANSFORM.position),
     ),
     rotation: cloneVector(
-      corePlacement?.rotation ?? DEFAULT_SCENE_TRANSFORM.rotation,
+      placementIsActive && placementEdit
+        ? placementEdit.rotation
+        : (corePlacement?.rotation ?? DEFAULT_SCENE_TRANSFORM.rotation),
     ),
     scale: cloneVector(
       corePlacement?.scale ?? DEFAULT_SCENE_TRANSFORM.scale,
@@ -637,6 +671,11 @@ export function SceneStudio({
           placementIsActive && placementEdit
             ? placementEdit.position
             : selectedCustomAsset.transform.position,
+        ),
+        rotation: cloneVector(
+          placementIsActive && placementEdit
+            ? placementEdit.rotation
+            : selectedCustomAsset.transform.rotation,
         ),
       }
     : undefined;
@@ -671,18 +710,68 @@ export function SceneStudio({
           <strong>
             {active ? copy.dragPlacementActive : copy.dragPlacement}
           </strong>
-          <p>{active ? copy.dragPlacementArmed : copy.dragPlacementHelp}</p>
+          <p>
+            {active
+              ? copy.dragModes[placementEdit.mode].help
+              : copy.dragPlacementHelp}
+          </p>
           {active && (
             <code
               className="studio-placement-coordinates"
               aria-label={copy.placementCoordinates}
             >
-              X {placementEdit.position[0].toFixed(2)} · Y{" "}
-              {placementEdit.position[1].toFixed(2)} · Z{" "}
-              {placementEdit.position[2].toFixed(2)}
+              <span
+                className={
+                  placementEdit.mode === "plane" ? "is-affected" : ""
+                }
+              >
+                X {placementEdit.position[0].toFixed(2)}
+              </span>
+              <span
+                className={
+                  placementEdit.mode === "height" ? "is-affected" : ""
+                }
+              >
+                Y {placementEdit.position[1].toFixed(2)}
+              </span>
+              <span
+                className={
+                  placementEdit.mode === "plane" ? "is-affected" : ""
+                }
+              >
+                Z {placementEdit.position[2].toFixed(2)}
+              </span>
+              <span
+                className={
+                  placementEdit.mode === "rotation" ? "is-affected" : ""
+                }
+              >
+                Ry {placementEdit.rotation[1].toFixed(1)}°
+              </span>
             </code>
           )}
         </div>
+        {active && (
+          <div
+            className="studio-placement-modes"
+            role="group"
+            aria-label={copy.dragMode}
+          >
+            {(
+              ["plane", "height", "rotation"] as const satisfies readonly ScenePlacementMode[]
+            ).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={placementEdit.mode === mode ? "is-active" : ""}
+                aria-pressed={placementEdit.mode === mode}
+                onClick={() => onPlacementModeChange(mode)}
+              >
+                {copy.dragModes[mode].label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="studio-placement-actions">
           {active ? (
             <>
