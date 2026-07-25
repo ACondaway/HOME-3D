@@ -1,12 +1,12 @@
 <div align="center">
 
-<p><sub>AN INTERACTIVE PERSONAL SPACE</sub></p>
+<p><sub>AN ALL-IN-ONE PERSONAL HOMEPAGE</sub></p>
 
 <h1><img src="./.github/assets/living-index-title.png" alt="The Living Index" width="768"></h1>
 
-<h3>A portfolio you do not scroll through — you step into it.</h3>
+<h3>Your work, life, interests, and everything beyond — all in one place.</h3>
 
-<p>An explorable bilingual room for a life, its work, and everything in between.</p>
+<p>An explorable bilingual digital home for the whole person behind the résumé.</p>
 
 <p>
   <a href="./README.md"><strong>English</strong></a>
@@ -45,15 +45,17 @@
 
 ![The Living Index opening screen, rendered from the current application](./.github/assets/living-index-hero.jpg)
 
-## ✦ A portfolio you can enter
+## ✦ One homepage for the whole person
 
-The Living Index turns a personal homepage into a small world: part portfolio, part archive, and part living self-portrait. Instead of navigating a stack of conventional pages, visitors move through a room where meaningful objects become entrances into music, research, photography, making, daily rituals, and future plans.
+The Living Index is an **All-in-One personal homepage** designed to present a person in full—not only what they have made, but how they work, live, learn, play, care, remember, and imagine what comes next. It brings professional work, research, projects, daily life, hobbies, photography, music, travel, social links, personal notes, and future plans into one coherent digital home.
+
+Instead of scattering identity across a portfolio, résumé, link-in-bio, photo gallery, blog, and social profile, The Living Index connects those dimensions through one explorable room. Meaningful objects become entrances into different parts of a life, while flexible content cards make space for both polished achievements and the ordinary details that reveal the person behind them.
 
 The 3D room is never the only way in. Every spatial interaction is mirrored by a complete semantic content index, so the same story remains accessible without WebGL, precise pointer control, or motion.
 
-| 🌗 Time-aware | 🧭 Object-led | 🛠️ Studio-built |
+| 💼 Work & practice | 🌿 Life & interests | ✦ One living identity |
 |---|---|---|
-| The author’s timezone moves the sun, changes the atmosphere, and turns on the night lights. | Objects are more than navigation icons: each one carries a chapter, memory, practice, or unfinished question. | Content, custom assets, object placement, photography, links, and modular cards can be shaped visually. |
+| Present projects, research, professional experience, making, writing, and ways to connect. | Share music, photography, fitness, reading, travel, rituals, memories, and whatever matters personally. | Bring every dimension together in one bilingual, time-aware space that can keep evolving with its author. |
 
 ## 🖼️ Inside the experience
 
@@ -82,7 +84,7 @@ The 3D room is never the only way in. Every spatial interaction is mirrored by a
 
 ## 🛠️ Content Studio
 
-Content Studio keeps the portfolio editable without flattening it into a generic CMS. It supports bilingual profile content, composable text/media/link cards, personal photography, social links, custom GLB assets, and live scene arrangement.
+Content Studio keeps the All-in-One homepage editable without flattening it into a generic CMS. It supports bilingual profile content, composable text/media/link cards, personal photography, social links, custom GLB assets, and live scene arrangement.
 
 Objects can be positioned through numeric controls or confirmed drag sessions across floor movement, height, and heading modes. Imported assets may remain purely decorative or become interactive entrances with their own page content.
 
@@ -102,6 +104,7 @@ Start with the repository’s [coding agent guide](./AGENTS.md). Every skill is 
 
 ## 🧩 Highlights
 
+- 🏠 **All-in-One personal homepage** — bring work, life, hobbies, projects, memories, social presence, and future plans into one coherent digital home.
 - 🤖 **Agent-native customization** — repository-owned skills turn natural-language intent into changes that respect the project’s real architecture and validation rules.
 - 🌐 **Bilingual by design** — Chinese and English share one spatial system while keeping independent editorial content.
 - ☀️ **Author-local lighting** — fixed GMT offsets and IANA timezones drive the clock, sun arc, twilight, and artificial lights.
