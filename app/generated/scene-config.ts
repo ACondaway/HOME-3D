@@ -8,61 +8,92 @@
 import type { SceneConfig } from "../content-config";
 
 export const PUBLISHED_SCENE_CONFIG: SceneConfig = {
-  placements: {
-    fitness: {
-      position: [0.56, 0, 0.05],
+  "placements": {
+    "fitness": {
+      "position": [
+        0.56,
+        0,
+        0.05
+      ]
     },
-    making: {
-      position: [3.23, 0, -0.05],
+    "making": {
+      "position": [
+        3.23,
+        0,
+        -0.05
+      ]
     },
-    photography: {
-      position: [-0.14, 0, 1.01],
+    "photography": {
+      "position": [
+        -0.14,
+        0,
+        1.01
+      ]
     },
-    ritual: {
-      position: [-0.96, 0, 0.4],
+    "ritual": {
+      "position": [
+        -0.96,
+        0,
+        0.4
+      ]
     },
-    travel: {
-      position: [-1.16, 0, 0.02],
-    },
+    "travel": {
+      "position": [
+        -1.16,
+        0,
+        0.02
+      ]
+    }
   },
-  customAssets: [
+  "customAssets": [
     {
-      id: "custom-9d9b16ba-8e1c-4cc5-8e3b-9067f778c339",
-      behavior: "interactive",
-      accent: "#C99A62",
-      transform: {
-        position: [1.09, 0, -0.13],
-        rotation: [0, 0, 0],
-        scale: [1, 1, 1],
+      "id": "custom-9d9b16ba-8e1c-4cc5-8e3b-9067f778c339",
+      "behavior": "interactive",
+      "accent": "#C99A62",
+      "transform": {
+        "position": [
+          1.09,
+          0,
+          -0.13
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
       },
-      content: {
-        zh: {
-          objectLabel: "奶龙",
-          sectionTitle: "我就是奶龙",
-          trait: "",
-          teaser: "",
-          intro: "",
-          status: "场景陈列",
-          lastUpdated: "",
-          note: "",
-          metrics: [],
-          entries: [],
+      "content": {
+        "zh": {
+          "objectLabel": "奶龙",
+          "sectionTitle": "我就是奶龙",
+          "trait": "",
+          "teaser": "",
+          "intro": "",
+          "status": "场景陈列",
+          "lastUpdated": "",
+          "note": "",
+          "metrics": [],
+          "entries": []
         },
-        en: {
-          objectLabel: "Nailoong",
-          sectionTitle: "I am Nailoong",
-          trait: "",
-          teaser: "",
-          intro: "",
-          status: "In the room",
-          lastUpdated: "",
-          note: "",
-          metrics: [],
-          entries: [],
-        },
+        "en": {
+          "objectLabel": "Nailoong",
+          "sectionTitle": "I am Nailoong",
+          "trait": "",
+          "teaser": "",
+          "intro": "",
+          "status": "In the room",
+          "lastUpdated": "",
+          "note": "",
+          "metrics": [],
+          "entries": []
+        }
       },
-      modelSrc:
-        "/uploads/models/80e3635e-b430-47d6-a114-83f7c2f14dbd.glb",
-    },
-  ],
+      "modelSrc": "/uploads/models/80e3635e-b430-47d6-a114-83f7c2f14dbd.glb"
+    }
+  ]
 };

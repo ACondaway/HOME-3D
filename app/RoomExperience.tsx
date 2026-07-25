@@ -71,6 +71,10 @@ import {
   type CustomModelLoadState,
 } from "./model-loading";
 import { PUBLISHED_SCENE_CONFIG } from "./generated/scene-config";
+import {
+  CONTENT_DRAFT_STORAGE_KEY,
+  shouldUseContentDraft,
+} from "./content-draft";
 
 type Locale = ContentLocale;
 
@@ -4208,16 +4212,18 @@ export default function RoomExperience() {
       }
 
       let next = published;
-      try {
-        const localDraft = window.localStorage.getItem(
-          "living-index.content-draft.v1",
-        );
-        if (localDraft) next = parseSiteContent(localDraft);
-      } catch {
+      if (shouldUseContentDraft(window.location.href)) {
         try {
-          window.localStorage.removeItem("living-index.content-draft.v1");
+          const localDraft = window.localStorage.getItem(
+            CONTENT_DRAFT_STORAGE_KEY,
+          );
+          if (localDraft) next = parseSiteContent(localDraft);
         } catch {
-          // Storage may be unavailable in private or hardened browser modes.
+          try {
+            window.localStorage.removeItem(CONTENT_DRAFT_STORAGE_KEY);
+          } catch {
+            // Storage may be unavailable in private or hardened browser modes.
+          }
         }
       }
 
@@ -4235,16 +4241,16 @@ export default function RoomExperience() {
   }, []);
 
   useEffect(() => {
-    if (!contentLoaded) return;
+    if (!contentLoaded || !studioEnabled) return;
     try {
       window.localStorage.setItem(
-        "living-index.content-draft.v1",
+        CONTENT_DRAFT_STORAGE_KEY,
         JSON.stringify(contentConfig),
       );
     } catch {
       // Keep the in-memory draft usable when the browser quota is exhausted.
     }
-  }, [contentConfig, contentLoaded]);
+  }, [contentConfig, contentLoaded, studioEnabled]);
 
   const updateRoute = useCallback((id: AssetId | null, mode: "push" | "replace") => {
     const url = new URL(window.location.href);
@@ -4866,7 +4872,7 @@ export default function RoomExperience() {
         onReset={() => {
           cancelScenePlacementEdit();
           try {
-            window.localStorage.removeItem("living-index.content-draft.v1");
+            window.localStorage.removeItem(CONTENT_DRAFT_STORAGE_KEY);
           } catch {
             // Reset still restores published content when storage is blocked.
           }

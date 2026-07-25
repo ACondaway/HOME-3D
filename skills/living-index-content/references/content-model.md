@@ -57,7 +57,9 @@
 
 ## Frequent failures
 
-- Clear `localStorage["living-index.content-draft.v1"]` when a browser draft masks repository JSON.
+- On `?studio=1`, clear
+  `localStorage["living-index.content-draft.v1"]` when a browser draft masks
+  repository JSON. Normal published routes ignore this authoring draft.
 - Fix mismatched or generated photo IDs before diagnosing missing images.
 - Commit referenced upload files with `site-content.json`.
 - Do not use remote URLs or arbitrary relative paths for uploaded media.

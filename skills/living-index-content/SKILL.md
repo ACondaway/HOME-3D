@@ -33,7 +33,9 @@ Treat the repository-owned content model as the contract. Prefer data changes ov
 
 1. Run `npm run dev`.
 2. Open `/?studio=1`.
-3. Clear or reset the `living-index.content-draft.v1` browser draft when repository edits appear stale.
+3. On `?studio=1`, clear or reset the `living-index.content-draft.v1`
+   browser draft when repository edits appear stale. Normal published routes
+   intentionally ignore this authoring draft.
 4. Upload media only from the loopback development server.
 5. Save after uploading so the generated `/uploads/...` path enters `site-content.json`.
 6. Commit both the JSON reference and every referenced uploaded file.

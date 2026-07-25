@@ -53,7 +53,9 @@ npm test
 git diff --check
 ```
 
-Use local `npm run dev` for visual interaction checks. Reset the Content Studio browser draft if committed JSON appears stale.
+Use local `npm run dev` for visual interaction checks. On `?studio=1`, reset
+the Content Studio browser draft if committed JSON appears stale; normal
+published routes ignore the authoring draft.
 
 ## Deliver safely
 

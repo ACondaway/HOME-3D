@@ -25,7 +25,8 @@
 - Open Content Studio with `?studio=1`.
 - Select locale with `?lang=zh|en`.
 - Open content with `?section=<asset-id>`.
-- Expect the local browser draft to override repository JSON until reset.
+- Expect the local browser draft to override repository JSON only on
+  `?studio=1`; normal published routes always use committed content.
 - Keep production content endpoints read-only; local Vite middleware owns write/upload operations.
 - Keep GLB uploads staged outside `public` until save. The save transaction
   promotes final references, regenerates scene source, and prunes only files

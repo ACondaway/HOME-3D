@@ -40,8 +40,8 @@
 - Finish placement before import, export, save, selection changes, or removal.
 - Saving writes the normalized scene to `public/content/site-content.json` and
   deterministically regenerates `app/generated/scene-config.ts`. Published
-  runtime scene state comes from the generated module; the browser draft still
-  drives unsaved live preview.
+  runtime scene state comes from the generated module. Only `?studio=1` reads
+  the browser draft for unsaved live preview; normal routes ignore it.
 
 ## Author-local lighting
 

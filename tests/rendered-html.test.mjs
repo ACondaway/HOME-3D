@@ -62,6 +62,7 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
     sceneStudio,
     scenePlacement,
     generatedScene,
+    contentDraft,
     contentCardEditor,
     globalStyles,
   ] = await Promise.all([
@@ -83,6 +84,7 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
       new URL("../app/generated/scene-config.ts", import.meta.url),
       "utf8",
     ),
+    readFile(new URL("../app/content-draft.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/ContentCardEditor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
@@ -124,6 +126,9 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(room, /mergeSceneConfig/);
   assert.match(room, /PUBLISHED_SCENE_CONFIG/);
   assert.match(room, /applyPublishedScene/);
+  assert.match(room, /shouldUseContentDraft\(window\.location\.href\)/);
+  assert.match(room, /!contentLoaded \|\| !studioEnabled/);
+  assert.match(contentDraft, /searchParams\.get\("studio"\) === "1"/);
   assert.match(room, /Object\.hasOwn\(assetById, section\)/);
   assert.match(room, /new AbortController\(\)/);
   assert.match(room, /sourceData instanceof ImageBitmap/);

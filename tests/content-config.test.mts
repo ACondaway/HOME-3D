@@ -7,6 +7,9 @@ const contentConfig = (await import(
 const { isAssetId, PORTFOLIO_ASSETS } = (await import(
   new URL("../app/portfolio-data.ts", import.meta.url).href
 )) as typeof import("../app/portfolio-data");
+const { CONTENT_DRAFT_STORAGE_KEY, shouldUseContentDraft } = (await import(
+  new URL("../app/content-draft.ts", import.meta.url).href
+)) as typeof import("../app/content-draft");
 
 const {
   DEFAULT_SCENE_TRANSFORM,
@@ -41,6 +44,27 @@ const emptyDocument = {
   profile: {},
   assets: {},
 };
+
+test("loads browser drafts only on the explicit Content Studio route", () => {
+  assert.equal(
+    CONTENT_DRAFT_STORAGE_KEY,
+    "living-index.content-draft.v1",
+  );
+  assert.equal(shouldUseContentDraft("https://example.com/"), false);
+  assert.equal(
+    shouldUseContentDraft("https://example.com/?section=music"),
+    false,
+  );
+  assert.equal(
+    shouldUseContentDraft("https://example.com/?studio=0"),
+    false,
+  );
+  assert.equal(
+    shouldUseContentDraft("https://example.com/?studio=1"),
+    true,
+  );
+  assert.equal(shouldUseContentDraft("not a url"), false);
+});
 
 test("keeps old version-one content compatible with optional media fields", () => {
   const normalized = normalizeSiteContent(emptyDocument);
