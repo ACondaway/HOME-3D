@@ -259,22 +259,30 @@ export const PORTFOLIO_ASSETS_EN: PortfolioAsset[] = [
     ],
     entries: [
       {
+        id: "lights-on",
         eyebrow: "SERIES 01",
         title: "The Lights Are Still On",
         body: "Windows where someone is still working, waiting, tidying, or returning home in the city at night.",
         meta: "24 frames · Shanghai",
+        imageAlt: "A lit window in the city at night",
       },
       {
+        id: "temporary-tables",
         eyebrow: "SERIES 02",
         title: "Temporary Tables",
         body: "How, amid moving, travel, and brief stays, a few objects can rebuild a corner that feels like one's own.",
         meta: "18 frames · Ongoing",
+        imageAlt:
+          "A temporary tabletop arranged with everyday objects during a short stay",
       },
       {
+        id: "unchosen-frames",
         eyebrow: "CONTACT SHEET",
         title: "The Photographs I Did Not Choose",
         body: "Failed compositions and missed moments remain in the archive; they often reveal more about how I was looking than the final edit.",
         meta: "Process archive",
+        imageAlt:
+          "A contact sheet of unchosen frames and the photographic process",
       },
     ],
     note: "The camera slows me down, and makes me admit that I am always choosing.",

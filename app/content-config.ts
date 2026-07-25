@@ -2,6 +2,68 @@ import type { AssetId, PortfolioAsset } from "./portfolio-data";
 
 export type ContentLocale = "zh" | "en";
 
+export type SocialPlatform =
+  | "github"
+  | "linkedin"
+  | "instagram"
+  | "x"
+  | "youtube"
+  | "bilibili"
+  | "weibo"
+  | "website"
+  | "email";
+
+export interface SocialLink {
+  id: string;
+  platform: SocialPlatform;
+  url: string;
+  label?: Partial<Record<ContentLocale, string>>;
+}
+
+export interface SiteMediaConfig {
+  profilePhotoSrc?: string;
+  profilePhotoAlt?: Partial<Record<ContentLocale, string>>;
+  photography?: {
+    sources?: Record<string, string>;
+    spotlightId?: string;
+  };
+}
+
+export const DEFAULT_PHOTOGRAPHY_ENTRY_IDS = [
+  "lights-on",
+  "temporary-tables",
+  "unchosen-frames",
+] as const;
+
+export function resolvePhotographyEntryId(
+  entry: PortfolioAsset["entries"][number],
+  index: number,
+): string {
+  return (
+    entry.id?.trim() ||
+    DEFAULT_PHOTOGRAPHY_ENTRY_IDS[index] ||
+    `photo-${String(index + 1).padStart(2, "0")}`
+  );
+}
+
+export function resolvePhotographyEntryIds(
+  entries: readonly PortfolioAsset["entries"][number][],
+): string[] {
+  const usedIds = new Set<string>();
+
+  return entries.map((entry, index) => {
+    const baseId = resolvePhotographyEntryId(entry, index);
+    let resolvedId = baseId;
+    let suffix = 2;
+    while (usedIds.has(resolvedId)) {
+      resolvedId = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+    usedIds.add(resolvedId);
+    return resolvedId;
+  });
+}
+
 export interface ProfileContent {
   displayName: string;
   logoInitial: string;
@@ -42,7 +104,22 @@ export interface SiteContentConfig {
       Partial<Record<AssetId, AssetContentOverride>>
     >
   >;
+  media?: SiteMediaConfig;
+  socialLinks?: SocialLink[];
 }
+
+export const DEFAULT_SOCIAL_LINKS: readonly SocialLink[] = [
+  {
+    id: "github",
+    platform: "github",
+    url: "https://github.com/ACondaway",
+  },
+  {
+    id: "email",
+    platform: "email",
+    url: "mailto:acondaway@sjtu.edu.cn",
+  },
+];
 
 export const DEFAULT_PROFILE: Readonly<
   Record<ContentLocale, Readonly<ProfileContent>>
@@ -127,6 +204,21 @@ export const CONTENT_LIMITS = {
     entryTitle: 240,
     entryBody: 2_000,
     entryMeta: 240,
+    entryId: 120,
+    entryImageAlt: 500,
+  },
+  media: {
+    path: 2_048,
+    alt: 500,
+    sourceId: 120,
+    sources: 48,
+    spotlightId: 120,
+  },
+  social: {
+    links: 12,
+    id: 120,
+    url: 2_048,
+    label: 160,
   },
 } as const;
 
@@ -134,6 +226,17 @@ type UnknownRecord = Record<string, unknown>;
 
 const CONTENT_LOCALES = ["zh", "en"] as const satisfies readonly ContentLocale[];
 const ASSET_ID_SET: ReadonlySet<string> = new Set(CONTENT_ASSET_IDS);
+const SOCIAL_PLATFORM_SET: ReadonlySet<string> = new Set<SocialPlatform>([
+  "github",
+  "linkedin",
+  "instagram",
+  "x",
+  "youtube",
+  "bilibili",
+  "weibo",
+  "website",
+  "email",
+]);
 
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -149,6 +252,49 @@ const normalizeString = (
 
   const normalized = value.trim();
   return Array.from(normalized).slice(0, maximumLength).join("");
+};
+
+const normalizeIdentifier = (
+  value: unknown,
+  maximumLength: number,
+): string | undefined => {
+  const normalized = normalizeString(value, maximumLength);
+  if (!normalized) return undefined;
+
+  const identifier = normalized
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+
+  return identifier || undefined;
+};
+
+const normalizeLocalizedStrings = (
+  value: unknown,
+  maximumLength: number,
+): Partial<Record<ContentLocale, string>> | undefined => {
+  if (!isRecord(value)) return undefined;
+
+  const result: Partial<Record<ContentLocale, string>> = {};
+  for (const locale of CONTENT_LOCALES) {
+    if (!hasOwn(value, locale)) continue;
+    const localized = normalizeString(value[locale], maximumLength);
+    if (localized !== undefined) result[locale] = localized;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
+const normalizeUploadPath = (value: unknown): string | undefined => {
+  const normalized = normalizeString(value, CONTENT_LIMITS.media.path);
+  return normalized &&
+    /^\/uploads\/(?:profile|photography)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp|avif)$/i.test(
+      normalized,
+    )
+    ? normalized
+    : undefined;
 };
 
 const assignString = <Key extends string>(
@@ -246,6 +392,7 @@ const normalizeEntries = (
   if (!Array.isArray(value)) return undefined;
 
   const result: PortfolioAsset["entries"] = [];
+  const usedIds = new Set<string>();
   for (const item of value.slice(0, CONTENT_LIMITS.asset.entries)) {
     if (!isRecord(item)) continue;
 
@@ -267,8 +414,151 @@ const normalizeEntries = (
     ) {
       continue;
     }
-    result.push({ eyebrow, title, body, meta });
+    const entry: PortfolioAsset["entries"][number] = {
+      eyebrow,
+      title,
+      body,
+      meta,
+    };
+    if (hasOwn(item, "id")) {
+      const id = normalizeIdentifier(item.id, CONTENT_LIMITS.asset.entryId);
+      if (id && !usedIds.has(id)) {
+        entry.id = id;
+        usedIds.add(id);
+      }
+    }
+    if (hasOwn(item, "imageAlt")) {
+      const imageAlt = normalizeString(
+        item.imageAlt,
+        CONTENT_LIMITS.asset.entryImageAlt,
+      );
+      if (imageAlt !== undefined) entry.imageAlt = imageAlt;
+    }
+    result.push(entry);
   }
+  return result;
+};
+
+const normalizeMedia = (value: unknown): SiteMediaConfig | undefined => {
+  if (!isRecord(value)) return undefined;
+
+  const result: SiteMediaConfig = {};
+  if (hasOwn(value, "profilePhotoSrc")) {
+    const profilePhotoSrc = normalizeUploadPath(value.profilePhotoSrc);
+    if (profilePhotoSrc !== undefined) {
+      result.profilePhotoSrc = profilePhotoSrc;
+    }
+  }
+
+  if (hasOwn(value, "profilePhotoAlt")) {
+    const profilePhotoAlt = normalizeLocalizedStrings(
+      value.profilePhotoAlt,
+      CONTENT_LIMITS.media.alt,
+    );
+    if (profilePhotoAlt) result.profilePhotoAlt = profilePhotoAlt;
+  }
+
+  if (isRecord(value.photography)) {
+    const photography: NonNullable<SiteMediaConfig["photography"]> = {};
+
+    if (isRecord(value.photography.sources)) {
+      const sources: Record<string, string> = {};
+      for (const [sourceIdInput, sourceInput] of Object.entries(
+        value.photography.sources,
+      )) {
+        if (Object.keys(sources).length >= CONTENT_LIMITS.media.sources) break;
+        const sourceId = normalizeIdentifier(
+          sourceIdInput,
+          CONTENT_LIMITS.media.sourceId,
+        );
+        const source = normalizeUploadPath(sourceInput);
+        if (!sourceId || !source) continue;
+        sources[sourceId] = source;
+      }
+      if (Object.keys(sources).length > 0) photography.sources = sources;
+    }
+
+    if (hasOwn(value.photography, "spotlightId")) {
+      const spotlightId = normalizeIdentifier(
+        value.photography.spotlightId,
+        CONTENT_LIMITS.media.spotlightId,
+      );
+      if (spotlightId) photography.spotlightId = spotlightId;
+    }
+
+    if (Object.keys(photography).length > 0) {
+      result.photography = photography;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
+const normalizeSocialUrl = (
+  value: unknown,
+  platform: SocialPlatform,
+): string | undefined => {
+  const normalized = normalizeString(value, CONTENT_LIMITS.social.url);
+  if (!normalized) return undefined;
+
+  try {
+    const parsed = new URL(normalized);
+    if (platform === "email") {
+      const emailAddress = parsed.pathname;
+      if (
+        parsed.protocol !== "mailto:" ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)
+      ) {
+        return undefined;
+      }
+      return normalized;
+    }
+
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? normalized
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+export function isValidSocialUrl(
+  platform: SocialPlatform,
+  value: string,
+): boolean {
+  return normalizeSocialUrl(value, platform) !== undefined;
+}
+
+const normalizeSocialLinks = (value: unknown): SocialLink[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+
+  const result: SocialLink[] = [];
+  const usedIds = new Set<string>();
+  for (const item of value) {
+    if (result.length >= CONTENT_LIMITS.social.links) break;
+    if (!isRecord(item)) continue;
+
+    const id = normalizeIdentifier(item.id, CONTENT_LIMITS.social.id);
+    const platform =
+      typeof item.platform === "string" &&
+      SOCIAL_PLATFORM_SET.has(item.platform)
+        ? (item.platform as SocialPlatform)
+        : undefined;
+    if (!id || usedIds.has(id) || !platform) continue;
+
+    const url = normalizeSocialUrl(item.url, platform);
+    if (!url) continue;
+
+    const link: SocialLink = { id, platform, url };
+    const label = normalizeLocalizedStrings(
+      item.label,
+      CONTENT_LIMITS.social.label,
+    );
+    if (label) link.label = label;
+    result.push(link);
+    usedIds.add(id);
+  }
+
   return result;
 };
 
@@ -353,7 +643,15 @@ export function normalizeSiteContent(input: unknown): SiteContentConfig {
     }
   }
 
-  return { version: 1, profile, assets };
+  const result: SiteContentConfig = { version: 1, profile, assets };
+  const media = normalizeMedia(input.media);
+  if (media) result.media = media;
+
+  if (hasOwn(input, "socialLinks") && Array.isArray(input.socialLinks)) {
+    result.socialLinks = normalizeSocialLinks(input.socialLinks) ?? [];
+  }
+
+  return result;
 }
 
 export class ContentConfigValidationError extends Error {
@@ -427,4 +725,34 @@ export function mergeAssets(
         : asset.entries,
     };
   });
+}
+
+export function mergeMedia(
+  config: SiteContentConfig = EMPTY_SITE_CONTENT,
+): SiteMediaConfig {
+  const media = normalizeSiteContent(config).media;
+  if (!media) return {};
+
+  const result: SiteMediaConfig = { ...media };
+  if (media.profilePhotoAlt) {
+    result.profilePhotoAlt = { ...media.profilePhotoAlt };
+  }
+  if (media.photography) {
+    result.photography = { ...media.photography };
+    if (media.photography.sources) {
+      result.photography.sources = { ...media.photography.sources };
+    }
+  }
+  return result;
+}
+
+export function mergeSocialLinks(
+  config: SiteContentConfig = EMPTY_SITE_CONTENT,
+): SocialLink[] {
+  const normalized = normalizeSiteContent(config);
+  const links = normalized.socialLinks ?? DEFAULT_SOCIAL_LINKS;
+
+  return links.map((link) =>
+    link.label ? { ...link, label: { ...link.label } } : { ...link },
+  );
 }

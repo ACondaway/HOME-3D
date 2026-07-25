@@ -4,10 +4,18 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
 import type { Plugin, ViteDevServer } from "vite";
 
-const ENDPOINT = "/__content-studio/save";
-const MAX_BODY_BYTES = 256 * 1024;
+const SAVE_ENDPOINT = "/__content-studio/save";
+const UPLOAD_ENDPOINT = "/__content-studio/upload";
+const MAX_SAVE_BODY_BYTES = 256 * 1024;
+const MAX_UPLOAD_BODY_BYTES = 10 * 1024 * 1024;
 
 type JsonRecord = Record<string, unknown>;
+type UploadKind = "profile" | "photography";
+
+type ImageFormat = {
+  extension: "jpg" | "png" | "webp" | "avif";
+  mimeType: "image/jpeg" | "image/png" | "image/webp" | "image/avif";
+};
 
 class RequestError extends Error {
   constructor(
@@ -142,13 +150,16 @@ function parseContentLength(request: IncomingMessage): number | undefined {
   return length;
 }
 
-async function readBody(request: IncomingMessage): Promise<Buffer> {
+async function readBody(
+  request: IncomingMessage,
+  maxBodyBytes: number,
+): Promise<Buffer> {
   const contentLength = parseContentLength(request);
-  if (contentLength !== undefined && contentLength > MAX_BODY_BYTES) {
+  if (contentLength !== undefined && contentLength > maxBodyBytes) {
     throw new RequestError(
       413,
       "PAYLOAD_TOO_LARGE",
-      `The request body must not exceed ${MAX_BODY_BYTES} bytes.`,
+      `The request body must not exceed ${maxBodyBytes} bytes.`,
     );
   }
 
@@ -162,7 +173,7 @@ async function readBody(request: IncomingMessage): Promise<Buffer> {
       : Buffer.from(rawChunk as Uint8Array);
 
     size += chunk.byteLength;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBodyBytes) {
       exceededLimit = true;
       chunks.length = 0;
       continue;
@@ -177,11 +188,95 @@ async function readBody(request: IncomingMessage): Promise<Buffer> {
     throw new RequestError(
       413,
       "PAYLOAD_TOO_LARGE",
-      `The request body must not exceed ${MAX_BODY_BYTES} bytes.`,
+      `The request body must not exceed ${maxBodyBytes} bytes.`,
     );
   }
 
   return Buffer.concat(chunks, size);
+}
+
+function parseUploadKind(value: string | null): UploadKind {
+  if (value === "profile" || value === "photography") {
+    return value;
+  }
+
+  throw new RequestError(
+    400,
+    "INVALID_UPLOAD_KIND",
+    'The "kind" query parameter must be either "profile" or "photography".',
+  );
+}
+
+function hasAsciiAt(body: Buffer, offset: number, expected: string): boolean {
+  return (
+    body.byteLength >= offset + expected.length &&
+    body.toString("ascii", offset, offset + expected.length) === expected
+  );
+}
+
+function isAvif(body: Buffer): boolean {
+  if (body.byteLength < 16 || !hasAsciiAt(body, 4, "ftyp")) {
+    return false;
+  }
+
+  const declaredBoxSize = body.readUInt32BE(0);
+  const boxEnd =
+    declaredBoxSize === 0
+      ? body.byteLength
+      : Math.min(declaredBoxSize, body.byteLength);
+
+  if (
+    declaredBoxSize === 1 ||
+    boxEnd < 16 ||
+    declaredBoxSize > body.byteLength
+  ) {
+    return false;
+  }
+
+  if (hasAsciiAt(body, 8, "avif") || hasAsciiAt(body, 8, "avis")) {
+    return true;
+  }
+
+  for (let offset = 16; offset + 4 <= boxEnd; offset += 4) {
+    if (hasAsciiAt(body, offset, "avif") || hasAsciiAt(body, offset, "avis")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function detectImageFormat(body: Buffer): ImageFormat | undefined {
+  if (
+    body.byteLength >= 3 &&
+    body[0] === 0xff &&
+    body[1] === 0xd8 &&
+    body[2] === 0xff
+  ) {
+    return { extension: "jpg", mimeType: "image/jpeg" };
+  }
+
+  if (
+    body.byteLength >= 8 &&
+    body[0] === 0x89 &&
+    hasAsciiAt(body, 1, "PNG") &&
+    body[4] === 0x0d &&
+    body[5] === 0x0a &&
+    body[6] === 0x1a &&
+    body[7] === 0x0a
+  ) {
+    return { extension: "png", mimeType: "image/png" };
+  }
+
+  if (hasAsciiAt(body, 0, "RIFF") && hasAsciiAt(body, 8, "WEBP")) {
+    return { extension: "webp", mimeType: "image/webp" };
+  }
+
+  if (isAvif(body)) {
+    return { extension: "avif", mimeType: "image/avif" };
+  }
+
+  return undefined;
 }
 
 function validateContent(value: unknown): asserts value is JsonRecord {
@@ -255,7 +350,7 @@ async function handlePut(
     );
   }
 
-  const body = await readBody(request);
+  const body = await readBody(request, MAX_SAVE_BODY_BYTES);
   let parsed: unknown;
 
   try {
@@ -274,25 +369,115 @@ async function handlePut(
   });
 }
 
+async function atomicWriteImage(
+  directory: string,
+  content: Buffer,
+  extension: ImageFormat["extension"],
+): Promise<string> {
+  const filename = `${randomUUID()}.${extension}`;
+  const destination = resolve(directory, filename);
+  const temporaryPath = resolve(
+    directory,
+    `.${filename}.${process.pid}.${randomUUID()}.tmp`,
+  );
+
+  await mkdir(directory, { recursive: true });
+
+  try {
+    await writeFile(temporaryPath, content, { flag: "wx" });
+    await rename(temporaryPath, destination);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+
+  return filename;
+}
+
+async function handleUpload(
+  request: IncomingMessage,
+  response: ServerResponse,
+  uploadsRoot: string,
+  kindValue: string | null,
+): Promise<void> {
+  if (!hasLoopbackOrigin(request.headers.origin)) {
+    throw new RequestError(
+      403,
+      "FORBIDDEN_ORIGIN",
+      "The upload endpoint only accepts requests from a loopback origin.",
+    );
+  }
+
+  const kind = parseUploadKind(kindValue);
+  const rawContentType = request.headers["content-type"];
+  const contentType =
+    typeof rawContentType === "string"
+      ? rawContentType.split(";", 1)[0]?.trim().toLowerCase()
+      : undefined;
+
+  if (
+    contentType !== "image/jpeg" &&
+    contentType !== "image/png" &&
+    contentType !== "image/webp" &&
+    contentType !== "image/avif" &&
+    contentType !== "application/octet-stream"
+  ) {
+    throw new RequestError(
+      415,
+      "UNSUPPORTED_MEDIA_TYPE",
+      "Content-Type must identify a JPEG, PNG, WebP, or AVIF image.",
+    );
+  }
+
+  const body = await readBody(request, MAX_UPLOAD_BODY_BYTES);
+  const imageFormat = detectImageFormat(body);
+
+  if (
+    !imageFormat ||
+    (contentType !== "application/octet-stream" &&
+      imageFormat.mimeType !== contentType)
+  ) {
+    throw new RequestError(
+      415,
+      "INVALID_IMAGE",
+      "The request body must contain an image matching its declared JPEG, PNG, WebP, or AVIF type.",
+    );
+  }
+
+  const filename = await atomicWriteImage(
+    resolve(uploadsRoot, kind),
+    body,
+    imageFormat.extension,
+  );
+
+  sendJson(response, 201, {
+    ok: true,
+    url: `/uploads/${kind}/${filename}`,
+  });
+}
+
 function installMiddleware(server: ViteDevServer): void {
-  const destination = resolve(
+  const saveDestination = resolve(
     server.config.root,
     "public",
     "content",
     "site-content.json",
   );
+  const uploadsRoot = resolve(server.config.root, "public", "uploads");
 
   server.middlewares.use((request, response, next) => {
-    let pathname: string;
+    let requestUrl: URL;
 
     try {
-      pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+      requestUrl = new URL(request.url ?? "/", "http://localhost");
     } catch {
       next();
       return;
     }
 
-    if (pathname !== ENDPOINT) {
+    if (
+      requestUrl.pathname !== SAVE_ENDPOINT &&
+      requestUrl.pathname !== UPLOAD_ENDPOINT
+    ) {
       next();
       return;
     }
@@ -322,14 +507,69 @@ function installMiddleware(server: ViteDevServer): void {
       return;
     }
 
+    if (requestUrl.pathname === UPLOAD_ENDPOINT) {
+      if (request.method !== "POST") {
+        sendJson(
+          response,
+          405,
+          {
+            ok: false,
+            error: {
+              code: "METHOD_NOT_ALLOWED",
+              message: "Only POST is supported.",
+            },
+          },
+          { Allow: "POST" },
+        );
+        return;
+      }
+
+      void handleUpload(
+        request,
+        response,
+        uploadsRoot,
+        requestUrl.searchParams.get("kind"),
+      ).catch((error: unknown) => {
+        if (response.headersSent) {
+          response.end();
+          return;
+        }
+
+        if (error instanceof RequestError) {
+          sendJson(response, error.status, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message,
+            },
+          });
+          return;
+        }
+
+        server.config.logger.error(
+          `[content-studio] Failed to upload image: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`,
+        );
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "UPLOAD_FAILED",
+            message: "The image could not be uploaded.",
+          },
+        });
+      });
+      return;
+    }
+
     if (request.method === "GET") {
       sendJson(response, 200, {
         ok: true,
         writable: true,
-        endpoint: ENDPOINT,
+        endpoint: SAVE_ENDPOINT,
         methods: ["GET", "PUT"],
         contentType: "application/json",
-        maxBodyBytes: MAX_BODY_BYTES,
+        maxBodyBytes: MAX_SAVE_BODY_BYTES,
         schemaVersion: 1,
       });
       return;
@@ -351,7 +591,7 @@ function installMiddleware(server: ViteDevServer): void {
       return;
     }
 
-    void handlePut(request, response, destination).catch((error: unknown) => {
+    void handlePut(request, response, saveDestination).catch((error: unknown) => {
       if (response.headersSent) {
         response.end();
         return;
@@ -385,9 +625,10 @@ function installMiddleware(server: ViteDevServer): void {
 }
 
 /**
- * Adds a loopback-only JSON persistence endpoint to the Vite development
- * server. Because the implementation lives exclusively in configureServer and
- * applies only while serving, production builds contain no write endpoint.
+ * Adds loopback-only content persistence and image upload endpoints to the
+ * Vite development server. Because the implementation lives exclusively in
+ * configureServer and applies only while serving, production builds contain
+ * no write endpoint.
  */
 export function contentStudio(): Plugin {
   return {

@@ -32,10 +32,7 @@ test("server-renders the finished personal-room experience", async () => {
 
   const html = await response.text();
   assert.match(html, /<html[^>]*lang="zh-CN"/i);
-  assert.match(
-    html,
-    /<title>你的名字 \/ Your Name · The Living Index<\/title>/i,
-  );
+  assert.match(html, /<title>[^<]+ · The Living Index<\/title>/i);
   assert.match(html, /Switch to English/);
   assert.match(html, /欢迎来/);
   assert.match(html, /打开内容索引/);
@@ -49,8 +46,19 @@ test("server-renders the finished personal-room experience", async () => {
 });
 
 test("keeps bilingual content, 3D interaction, and fallback navigation in the product source", async () => {
-  const [page, layout, room, data, dataEn, packageJson, studio, contentConfig] =
-    await Promise.all([
+  const [
+    page,
+    layout,
+    room,
+    data,
+    dataEn,
+    packageJson,
+    studio,
+    contentConfig,
+    aboutProfile,
+    photographyGallery,
+    imageUpload,
+  ] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/RoomExperience.tsx", import.meta.url), "utf8"),
@@ -59,6 +67,9 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/ContentStudio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/content-config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/AboutProfileModule.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/PhotographyGallery.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ImageUploadField.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<RoomExperience \/>/);
@@ -83,10 +94,30 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(studio, /Save to project/);
   assert.match(studio, /\/__content-studio\/save/);
   assert.match(studio, /site-content\.json/);
+  assert.match(studio, /\.\.\.config\.profile\[locale\]/);
+  assert.match(
+    studio,
+    /\.\.\.config\.assets\[locale\]\?\.\[asset\.id\]/,
+  );
+  assert.match(studio, /const normalized = parseSiteContent\(config\)/);
+  assert.match(studio, /stablePhotographyEntries/);
+  assert.match(studio, /STUDIO_LOCALES/);
+  assert.match(studio, /onChange\(\(current\)/);
+  assert.match(studio, /photography-spotlight/);
+  assert.match(imageUpload, /\/__content-studio\/upload/);
+  assert.match(imageUpload, /onDrop=/);
+  assert.match(aboutProfile, /about-social-links/);
+  assert.match(aboutProfile, /noopener noreferrer/);
+  assert.match(photographyGallery, /instant-photo-dialog/);
+  assert.match(photographyGallery, /aria-modal="true"/);
+  assert.match(room, /asset\.id !== "photography"/);
   assert.match(contentConfig, /normalizeSiteContent/);
   assert.match(contentConfig, /mergeAssets/);
+  assert.match(contentConfig, /mergeMedia/);
+  assert.match(contentConfig, /mergeSocialLinks/);
   assert.match(contentConfig, /timezone: "GMT\+8"/);
   assert.match(packageJson, /"three":/);
+  assert.match(packageJson, /"react-icons":/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await assert.rejects(
@@ -111,7 +142,12 @@ test("keeps the Content Studio write endpoint local to the Vite development serv
   assert.match(plugin, /configureServer/);
   assert.match(plugin, /hasLoopbackHost/);
   assert.match(plugin, /hasLoopbackOrigin/);
-  assert.match(plugin, /MAX_BODY_BYTES = 256 \* 1024/);
+  assert.match(plugin, /MAX_SAVE_BODY_BYTES = 256 \* 1024/);
+  assert.match(plugin, /MAX_UPLOAD_BODY_BYTES = 10 \* 1024 \* 1024/);
+  assert.match(plugin, /\/__content-studio\/upload/);
+  assert.match(plugin, /detectImageFormat/);
+  assert.match(plugin, /randomUUID/);
+  assert.match(plugin, /public", "uploads"/);
   assert.match(plugin, /rename\(temporaryPath, path\)/);
   assert.match(viteConfig, /contentStudio\(\)/);
   const content = JSON.parse(persistedContent);

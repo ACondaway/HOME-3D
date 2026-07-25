@@ -56,10 +56,12 @@ export interface PortfolioAsset {
     label: string;
   }>;
   entries: Array<{
+    id?: string;
     eyebrow: string;
     title: string;
     body: string;
     meta: string;
+    imageAlt?: string;
   }>;
   note: string;
   specialty: AssetSpecialty;
@@ -321,22 +323,28 @@ export const PORTFOLIO_ASSETS: PortfolioAsset[] = [
     ],
     entries: [
       {
+        id: "lights-on",
         eyebrow: "SERIES 01",
         title: "灯还亮着",
         body: "夜间城市里仍然有人工作、等待、整理和回家的窗口。",
         meta: "24 frames · Shanghai",
+        imageAlt: "夜晚城市中一扇仍亮着灯的窗户",
       },
       {
+        id: "temporary-tables",
         eyebrow: "SERIES 02",
         title: "临时的桌子",
         body: "搬家、旅行与短暂停留中，人怎样用几件物品重新建立一个属于自己的角落。",
         meta: "18 frames · Ongoing",
+        imageAlt: "短暂停留中摆放着日常物件的临时桌面",
       },
       {
+        id: "unchosen-frames",
         eyebrow: "CONTACT SHEET",
         title: "没有选中的照片",
         body: "保留失败的构图与错过的时刻，它们常常比最终选择更能说明当时如何观看。",
         meta: "Process archive",
+        imageAlt: "包含未选照片与拍摄过程的接触印样",
       },
     ],
     note: "相机帮我慢一点，也让我承认自己总在选择。",

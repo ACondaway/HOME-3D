@@ -26,12 +26,19 @@ import {
 import {
   EMPTY_SITE_CONTENT,
   mergeAssets,
+  mergeMedia,
   mergeProfile,
+  mergeSocialLinks,
   parseSiteContent,
   type ContentLocale,
+  type ProfileContent,
   type SiteContentConfig,
+  type SiteMediaConfig,
+  type SocialLink,
 } from "./content-config";
+import { AboutProfileModule } from "./AboutProfileModule";
 import { ContentStudio } from "./ContentStudio";
+import { PhotographyGallery } from "./PhotographyGallery";
 import {
   formatZonedTime,
   getSolarLightingState,
@@ -1925,6 +1932,9 @@ function DetailPanel({
   asset,
   assetById,
   locale,
+  profile,
+  media,
+  socialLinks,
   onLocaleChange,
   onClose,
   onOpenRelated,
@@ -1933,6 +1943,9 @@ function DetailPanel({
   asset: PortfolioAsset;
   assetById: Record<AssetId, PortfolioAsset>;
   locale: Locale;
+  profile: ProfileContent;
+  media: SiteMediaConfig;
+  socialLinks: readonly SocialLink[];
   onLocaleChange: (locale: Locale) => void;
   onClose: () => void;
   onOpenRelated: (id: AssetId) => void;
@@ -2010,7 +2023,18 @@ function DetailPanel({
             <span>{copy.updated} / {asset.lastUpdated}</span>
           </div>
 
-          <p className="detail-intro">{asset.intro}</p>
+          {asset.id === "about" ? (
+            <AboutProfileModule
+              locale={locale}
+              profile={profile}
+              intro={asset.intro}
+              photoSrc={media.profilePhotoSrc}
+              photoAlt={media.profilePhotoAlt?.[locale]}
+              socialLinks={socialLinks}
+            />
+          ) : (
+            <p className="detail-intro">{asset.intro}</p>
+          )}
 
           <div className="metric-grid">
             {asset.metrics.map((metric) => (
@@ -2021,21 +2045,31 @@ function DetailPanel({
             ))}
           </div>
 
-          <SpecialtyModule asset={asset} locale={locale} />
+          {asset.id === "photography" ? (
+            <PhotographyGallery
+              asset={asset}
+              locale={locale}
+              media={media.photography}
+            />
+          ) : (
+            <SpecialtyModule asset={asset} locale={locale} />
+          )}
 
-          <div className="entry-grid">
-            {asset.entries.map((entry, index) => (
-              <article className="entry-card" key={entry.title}>
-                <div className="entry-number">
-                  {String(index + 1).padStart(2, "0")}
-                </div>
-                <p>{entry.eyebrow}</p>
-                <h3>{entry.title}</h3>
-                <div>{entry.body}</div>
-                <span>{entry.meta}</span>
-              </article>
-            ))}
-          </div>
+          {asset.id !== "photography" && (
+            <div className="entry-grid">
+              {asset.entries.map((entry, index) => (
+                <article className="entry-card" key={entry.id ?? entry.title}>
+                  <div className="entry-number">
+                    {String(index + 1).padStart(2, "0")}
+                  </div>
+                  <p>{entry.eyebrow}</p>
+                  <h3>{entry.title}</h3>
+                  <div>{entry.body}</div>
+                  <span>{entry.meta}</span>
+                </article>
+              ))}
+            </div>
+          )}
 
           <blockquote>{asset.note}</blockquote>
 
@@ -2272,6 +2306,14 @@ export default function RoomExperience() {
   const assets = useMemo(
     () => mergeAssets(baseAssets, locale, contentConfig),
     [baseAssets, contentConfig, locale],
+  );
+  const media = useMemo(
+    () => mergeMedia(contentConfig),
+    [contentConfig],
+  );
+  const socialLinks = useMemo(
+    () => mergeSocialLinks(contentConfig),
+    [contentConfig],
   );
   const assetById = useMemo(
     () =>
@@ -2752,6 +2794,9 @@ export default function RoomExperience() {
           asset={activeAsset}
           assetById={assetById}
           locale={locale}
+          profile={profile}
+          media={media}
+          socialLinks={socialLinks}
           onLocaleChange={changeLocale}
           onClose={closeAsset}
           onOpenRelated={(id) => openAsset(id)}

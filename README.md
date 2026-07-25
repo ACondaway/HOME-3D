@@ -274,20 +274,23 @@ http://localhost:3000/?studio=1
 - 城市和时区；
 - 12 件数字资产的名称、章节标题、特质、摘要、介绍、状态、更新时间和引文；
 - 每件资产的数据指标；
-- 每件资产的内容卡片。
+- 每件资产的内容卡片；
+- 镜子页面的个人照片、替代文本和社交媒体链接；
+- 相机页面的照片上传、替代文本与 Spotlight 主图。
 
 保存方式：
 
 1. 每次输入都会即时更新当前页面；
 2. 草稿自动写入当前浏览器的 `localStorage`；
-3. 本地开发时点击“保存到项目”，会把规范化内容原子写入 `public/content/site-content.json`；
-4. Git 提交并推送该 JSON 后，GitHub Actions 会发布新内容；
-5. “导出”会下载完整 JSON，“导入”可恢复或迁移内容，“复制 JSON”适合手工备份。
+3. 照片通过拖放或文件选择写入 `public/uploads/profile` 或 `public/uploads/photography`，JSON 只保存公开路径，不保存 base64；
+4. 本地开发时点击“保存到项目”，会把规范化内容原子写入 `public/content/site-content.json`；
+5. Git 提交并推送 JSON 与上传图片后，现有 Cloudflare Git 集成会接管发布；
+6. “导出”会下载完整 JSON，“导入”可恢复或迁移内容，“复制 JSON”适合手工备份。
 
 推荐发布流程：
 
 ```bash
-git add public/content/site-content.json
+git add public/content/site-content.json public/uploads
 git commit -m "Update portfolio content"
 git push
 ```
@@ -296,7 +299,10 @@ git push
 
 - 写入接口只存在于 `npm run dev`；
 - 只接受 loopback Host 与 Origin；
-- 请求必须是 JSON，最大 256KB；
+- 内容保存请求必须是 JSON，最大 256KB；
+- 图片上传只接受 JPEG、PNG、WebP、AVIF，最大 10MB、单边 10,000 像素且不超过 4,000 万像素，并在上传前解码、在服务端通过文件内容识别格式；
+- 上传文件使用随机文件名写入仓库的 `public/uploads`，原始文件名不参与路径；
+- “清除”只解除内容引用，不自动删除磁盘文件；提交前可人工检查并移除 `public/uploads` 中不再使用的图片；
 - 使用临时文件加 rename，避免写到一半损坏正式内容；
 - 生产构建没有这个 PUT 接口；
 - 线上工作台即使通过 `?studio=1` 打开，也只能本机预览、导入和导出；

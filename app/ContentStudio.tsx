@@ -2,19 +2,35 @@
 
 import {
   type ChangeEvent,
+  type Dispatch,
   type ReactNode,
+  type SetStateAction,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import {
+  CONTENT_LIMITS,
+  isValidSocialUrl,
+  mergeAssets,
+  mergeSocialLinks,
   parseSiteContent,
+  resolvePhotographyEntryIds,
   type ContentLocale,
   type ProfileContent,
   type SiteContentConfig,
+  type SocialLink,
+  type SocialPlatform,
 } from "./content-config";
-import type { AssetId, PortfolioAsset } from "./portfolio-data";
+import { ImageUploadField } from "./ImageUploadField";
+import { SocialIcon } from "./SocialIcon";
+import {
+  PORTFOLIO_ASSETS,
+  type AssetId,
+  type PortfolioAsset,
+} from "./portfolio-data";
+import { PORTFOLIO_ASSETS_EN } from "./portfolio-data-en";
 
 export interface ContentStudioProps {
   open: boolean;
@@ -22,7 +38,7 @@ export interface ContentStudioProps {
   config: SiteContentConfig;
   profile: ProfileContent;
   assets: PortfolioAsset[];
-  onChange: (config: SiteContentConfig) => void;
+  onChange: Dispatch<SetStateAction<SiteContentConfig>>;
   onLocaleChange: (locale: ContentLocale) => void;
   onClose: () => void;
   onReset?: () => void;
@@ -40,6 +56,55 @@ type AssetTextKey =
   | "status"
   | "lastUpdated"
   | "note";
+type PortfolioEntry = PortfolioAsset["entries"][number];
+type StablePhotographyEntry = PortfolioEntry & { id: string };
+
+const SOCIAL_PLATFORMS: readonly SocialPlatform[] = [
+  "github",
+  "linkedin",
+  "instagram",
+  "x",
+  "youtube",
+  "bilibili",
+  "weibo",
+  "website",
+  "email",
+];
+
+function createStudioId(prefix: string): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 9)}`;
+}
+
+const STUDIO_LOCALES = ["zh", "en"] as const satisfies readonly ContentLocale[];
+
+function withStablePhotographyIds(
+  entries: readonly PortfolioEntry[],
+): StablePhotographyEntry[] {
+  const ids = resolvePhotographyEntryIds(entries);
+  return entries.map((entry, index) => ({
+    ...entry,
+    id: ids[index]!,
+  }));
+}
+
+function getPhotographyEntriesForLocale(
+  config: SiteContentConfig,
+  locale: ContentLocale,
+): StablePhotographyEntry[] {
+  const rawEntries = config.assets[locale]?.photography?.entries;
+  const baseAssets =
+    locale === "zh" ? PORTFOLIO_ASSETS : PORTFOLIO_ASSETS_EN;
+  const mergedEntries = mergeAssets(baseAssets, locale, config).find(
+    (asset) => asset.id === "photography",
+  )?.entries;
+
+  return withStablePhotographyIds(rawEntries ?? mergedEntries ?? []);
+}
 
 const TEXT = {
   zh: {
@@ -63,10 +128,23 @@ const TEXT = {
     exported: "JSON 已导出",
     copied: "JSON 已复制",
     invalid: "文件不是有效的内容配置",
+    invalidSocial: "请先为每个社交链接填写有效地址",
     saveFailed: "无法写入项目，请改用导出",
     identity: "身份与首屏",
     identityHelp: "这些字段驱动首屏、房间标志和左下角位置。",
     assetHelp: "选择房间物件，编辑访客进入后看到的章节内容。",
+    aboutMedia: "个人照片与社交链接",
+    aboutMediaHelp:
+      "个人介绍继续使用上方“章节介绍”；照片与链接会排版在镜子页面的个人名片中。",
+    portrait: "个人照片",
+    portraitHelp: "拖动照片到上传区，或从设备中选择文件。",
+    socialLinks: "社交媒体链接",
+    addSocialLink: "添加社交链接",
+    photographyEntries: "摄影相纸",
+    photographyHelp:
+      "上传照片、选择 Spotlight；系列说明只会在访客点击相纸后显示。",
+    spotlight: "设为 Spotlight",
+    spotlightHelp: "Spotlight 会在摄影接触印样中优先放大展示。",
     metrics: "数据指标",
     entries: "内容卡片",
     addMetric: "添加指标",
@@ -97,6 +175,11 @@ const TEXT = {
       title: "标题",
       body: "正文",
       meta: "补充信息",
+      portraitAlt: "个人照片替代文本",
+      platform: "平台",
+      url: "链接地址",
+      socialLabel: "按钮文字",
+      photoAlt: "照片替代文本",
     },
   },
   en: {
@@ -121,12 +204,26 @@ const TEXT = {
     exported: "JSON exported",
     copied: "JSON copied",
     invalid: "That file is not a valid content configuration",
+    invalidSocial: "Add a valid URL for every social link before saving",
     saveFailed: "Could not write to the project; export instead",
     identity: "Identity and intro",
     identityHelp:
       "These fields drive the intro, room wordmark, and location label.",
     assetHelp:
       "Choose an object and edit the chapter visitors see when they enter.",
+    aboutMedia: "Portrait and social links",
+    aboutMediaHelp:
+      "The chapter introduction above remains your bio; the portrait and links form the profile card on the mirror page.",
+    portrait: "Portrait photo",
+    portraitHelp: "Drop a photo here or choose one from your device.",
+    socialLinks: "Social links",
+    addSocialLink: "Add social link",
+    photographyEntries: "Instant photos",
+    photographyHelp:
+      "Upload each image and choose a Spotlight. Series notes appear only after a visitor opens an instant photo.",
+    spotlight: "Set as Spotlight",
+    spotlightHelp:
+      "The Spotlight image receives the largest position in the contact sheet.",
     metrics: "Metrics",
     entries: "Content cards",
     addMetric: "Add metric",
@@ -157,6 +254,11 @@ const TEXT = {
       title: "Title",
       body: "Body",
       meta: "Metadata",
+      portraitAlt: "Portrait alternative text",
+      platform: "Platform",
+      url: "Link URL",
+      socialLabel: "Button label",
+      photoAlt: "Photo alternative text",
     },
   },
 } as const;
@@ -238,8 +340,17 @@ export function ContentStudio({
   const importRef = useRef<HTMLInputElement>(null);
 
   const selectedAsset = useMemo(
-    () => assets.find((asset) => asset.id === selectedId) ?? assets[0],
-    [assets, selectedId],
+    () => {
+      const asset =
+        assets.find((candidate) => candidate.id === selectedId) ?? assets[0];
+      if (!asset) return undefined;
+
+      return {
+        ...asset,
+        ...config.assets[locale]?.[asset.id],
+      };
+    },
+    [assets, config.assets, locale, selectedId],
   );
 
   useEffect(() => {
@@ -268,17 +379,24 @@ export function ContentStudio({
 
   if (!open) return null;
 
+  // The room-facing profile is normalized on every render. Overlay the raw
+  // studio draft so controlled fields keep in-progress whitespace until save.
+  const editableProfile: ProfileContent = {
+    ...profile,
+    ...config.profile[locale],
+  };
+
   const updateProfile = (key: ProfileKey, value: string) => {
-    onChange({
-      ...config,
+    onChange((current) => ({
+      ...current,
       profile: {
-        ...config.profile,
+        ...current.profile,
         [locale]: {
-          ...config.profile[locale],
+          ...current.profile[locale],
           [key]: value,
         },
       },
-    });
+    }));
   };
 
   const updateAsset = (
@@ -287,19 +405,207 @@ export function ContentStudio({
       NonNullable<SiteContentConfig["assets"][ContentLocale]>[AssetId]
     >,
   ) => {
-    onChange({
-      ...config,
+    onChange((current) => ({
+      ...current,
       assets: {
-        ...config.assets,
+        ...current.assets,
         [locale]: {
-          ...config.assets[locale],
+          ...current.assets[locale],
           [id]: {
-            ...config.assets[locale]?.[id],
+            ...current.assets[locale]?.[id],
             ...patch,
           },
         },
       },
+    }));
+  };
+
+  const editableSocialLinks: SocialLink[] =
+    config.socialLinks ?? mergeSocialLinks(config);
+  const hasInvalidSocialLinks = editableSocialLinks.some(
+    (link) => !isValidSocialUrl(link.platform, link.url),
+  );
+  const stablePhotographyEntries =
+    selectedAsset?.id === "photography"
+      ? withStablePhotographyIds(selectedAsset.entries)
+      : [];
+  const configuredSpotlightId =
+    config.media?.photography?.spotlightId;
+  const selectedSpotlightId = stablePhotographyEntries.some(
+    (entry) => entry.id === configuredSpotlightId,
+  )
+    ? configuredSpotlightId
+    : stablePhotographyEntries[0]?.id;
+  const photographyEntryLimitReached =
+    selectedAsset?.id === "photography" &&
+    STUDIO_LOCALES.some(
+      (targetLocale) =>
+        getPhotographyEntriesForLocale(config, targetLocale).length >=
+        CONTENT_LIMITS.asset.entries,
+    );
+
+  const updateMedia = (
+    patch: NonNullable<SiteContentConfig["media"]>,
+  ) => {
+    onChange((current) => ({
+      ...current,
+      media: {
+        ...current.media,
+        ...patch,
+      },
+    }));
+  };
+
+  const updatePhotoSource = (entryId: string, source?: string) => {
+    onChange((current) => {
+      if (
+        source &&
+        !STUDIO_LOCALES.some((targetLocale) =>
+          getPhotographyEntriesForLocale(current, targetLocale).some(
+            (entry) => entry.id === entryId,
+          ),
+        )
+      ) {
+        return current;
+      }
+
+      const sources = {
+        ...current.media?.photography?.sources,
+      };
+      if (source) sources[entryId] = source;
+      else delete sources[entryId];
+
+      return {
+        ...current,
+        media: {
+          ...current.media,
+          photography: {
+            ...current.media?.photography,
+            sources,
+          },
+        },
+      };
     });
+  };
+
+  const updatePhotographyMedia = (
+    patch: NonNullable<
+      NonNullable<SiteContentConfig["media"]>["photography"]
+    >,
+  ) => {
+    onChange((current) => ({
+      ...current,
+      media: {
+        ...current.media,
+        photography: {
+          ...current.media?.photography,
+          ...patch,
+        },
+      },
+    }));
+  };
+
+  const addPhotographyEntry = () => {
+    const id = createStudioId("photo");
+    onChange((current) => {
+      if (
+        STUDIO_LOCALES.some(
+          (targetLocale) =>
+            getPhotographyEntriesForLocale(current, targetLocale).length >=
+            CONTENT_LIMITS.asset.entries,
+        )
+      ) {
+        return current;
+      }
+
+      const assets: SiteContentConfig["assets"] = {
+        ...current.assets,
+      };
+
+      for (const targetLocale of STUDIO_LOCALES) {
+        const entries = getPhotographyEntriesForLocale(
+          current,
+          targetLocale,
+        );
+        const nextEntry: PortfolioAsset["entries"][number] = {
+          id,
+          imageAlt: "",
+          eyebrow: "NEW SERIES",
+          title:
+            targetLocale === "zh"
+              ? "新的摄影系列"
+              : "New photo series",
+          body: "",
+          meta: "",
+        };
+        assets[targetLocale] = {
+          ...current.assets[targetLocale],
+          photography: {
+            ...current.assets[targetLocale]?.photography,
+            entries: [...entries, nextEntry],
+          },
+        };
+      }
+
+      return {
+        ...current,
+        assets,
+      };
+    });
+  };
+
+  const removePhotographyEntry = (entryId: string) => {
+    onChange((current) => {
+      const assets: SiteContentConfig["assets"] = {
+        ...current.assets,
+      };
+
+      for (const targetLocale of STUDIO_LOCALES) {
+        assets[targetLocale] = {
+          ...current.assets[targetLocale],
+          photography: {
+            ...current.assets[targetLocale]?.photography,
+            entries: getPhotographyEntriesForLocale(
+              current,
+              targetLocale,
+            ).filter((entry) => entry.id !== entryId),
+          },
+        };
+      }
+
+      const sources = {
+        ...current.media?.photography?.sources,
+      };
+      delete sources[entryId];
+      const remainingEntries = getPhotographyEntriesForLocale(
+        { ...current, assets },
+        locale,
+      );
+      const spotlightId =
+        current.media?.photography?.spotlightId === entryId
+          ? remainingEntries[0]?.id
+          : current.media?.photography?.spotlightId;
+
+      return {
+        ...current,
+        assets,
+        media: {
+          ...current.media,
+          photography: {
+            ...current.media?.photography,
+            sources,
+            spotlightId,
+          },
+        },
+      };
+    });
+  };
+
+  const updateSocialLinks = (links: SocialLink[]) => {
+    onChange((current) => ({
+      ...current,
+      socialLinks: links,
+    }));
   };
 
   const exportJson = () => {
@@ -337,6 +643,11 @@ export function ContentStudio({
   };
 
   const saveProject = async () => {
+    if (hasInvalidSocialLinks) {
+      setStatus(text.invalidSocial);
+      return;
+    }
+
     setSaving(true);
     setStatus("");
     try {
@@ -347,7 +658,7 @@ export function ContentStudio({
         body: JSON.stringify(normalized),
       });
       if (!response.ok) throw new Error("save failed");
-      onChange(normalized);
+      onChange((current) => (current === config ? normalized : current));
       onProjectSaved?.(normalized);
       setStatus(text.saved);
     } catch {
@@ -528,7 +839,7 @@ export function ContentStudio({
                     <Field
                       key={key}
                       label={text.fields[key]}
-                      value={profile[key]}
+                      value={editableProfile[key]}
                       onChange={(value) => updateProfile(key, value)}
                       multiline={
                         key === "introDescription" || key === "quote"
@@ -588,6 +899,171 @@ export function ContentStudio({
                   </div>
                 </Section>
 
+                {selectedAsset.id === "about" && (
+                  <Section
+                    title={text.aboutMedia}
+                    description={text.aboutMediaHelp}
+                  >
+                    <div className="studio-about-media">
+                      <ImageUploadField
+                        locale={locale}
+                        kind="profile"
+                        label={text.portrait}
+                        description={text.portraitHelp}
+                        value={config.media?.profilePhotoSrc}
+                        alt={
+                          config.media?.profilePhotoAlt?.[locale] ??
+                          `${profile.displayName}`
+                        }
+                        fallback={profile.logoInitial}
+                        disabled={!projectWritable}
+                        onUploaded={(profilePhotoSrc) =>
+                          updateMedia({ profilePhotoSrc })
+                        }
+                        onClear={() =>
+                          updateMedia({ profilePhotoSrc: undefined })
+                        }
+                      />
+                      <Field
+                        label={text.fields.portraitAlt}
+                        value={
+                          config.media?.profilePhotoAlt?.[locale] ?? ""
+                        }
+                        onChange={(value) => {
+                          onChange((current) => ({
+                            ...current,
+                            media: {
+                              ...current.media,
+                              profilePhotoAlt: {
+                                ...current.media?.profilePhotoAlt,
+                                [locale]: value,
+                              },
+                            },
+                          }));
+                        }}
+                      />
+                    </div>
+
+                    <div className="studio-subsection-heading">
+                      <h4>{text.socialLinks}</h4>
+                    </div>
+                    {hasInvalidSocialLinks && (
+                      <p className="studio-validation-message" role="alert">
+                        {text.invalidSocial}
+                      </p>
+                    )}
+                    <div className="studio-repeater studio-social-repeater">
+                      {editableSocialLinks.map((link, index) => (
+                        <div
+                          className="studio-repeater-item is-social"
+                          key={link.id}
+                        >
+                          <span className="studio-social-icon" aria-hidden="true">
+                            <SocialIcon platform={link.platform} />
+                          </span>
+                          <div className="studio-social-fields">
+                            <label className="studio-field">
+                              <span>{text.fields.platform}</span>
+                              <select
+                                value={link.platform}
+                                onChange={(event) => {
+                                  const links = editableSocialLinks.map(
+                                    (item, itemIndex) =>
+                                      itemIndex === index
+                                        ? {
+                                            ...item,
+                                            platform: event.target
+                                              .value as SocialPlatform,
+                                          }
+                                        : item,
+                                  );
+                                  updateSocialLinks(links);
+                                }}
+                              >
+                                {SOCIAL_PLATFORMS.map((platform) => (
+                                  <option value={platform} key={platform}>
+                                    {platform}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <Field
+                              label={text.fields.socialLabel}
+                              value={link.label?.[locale] ?? ""}
+                              onChange={(value) => {
+                                const links = editableSocialLinks.map(
+                                  (item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          label: {
+                                            ...item.label,
+                                            [locale]: value,
+                                          },
+                                        }
+                                      : item,
+                                );
+                                updateSocialLinks(links);
+                              }}
+                            />
+                            <Field
+                              label={text.fields.url}
+                              value={link.url}
+                              onChange={(url) => {
+                                const links = editableSocialLinks.map(
+                                  (item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, url }
+                                      : item,
+                                );
+                                updateSocialLinks(links);
+                              }}
+                              wide
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            className="studio-remove-button"
+                            onClick={() =>
+                              updateSocialLinks(
+                                editableSocialLinks.filter(
+                                  (_, itemIndex) => itemIndex !== index,
+                                ),
+                              )
+                            }
+                          >
+                            {text.remove}
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="studio-add-button"
+                        disabled={
+                          editableSocialLinks.length >=
+                          CONTENT_LIMITS.social.links
+                        }
+                        onClick={() =>
+                          updateSocialLinks([
+                            ...editableSocialLinks,
+                            {
+                              id: createStudioId("social"),
+                              platform: "website",
+                              url: "https://",
+                              label: {
+                                [locale]:
+                                  locale === "zh" ? "新的链接" : "New link",
+                              },
+                            },
+                          ])
+                        }
+                      >
+                        + {text.addSocialLink}
+                      </button>
+                    </div>
+                  </Section>
+                )}
+
                 <Section title={text.metrics}>
                   <div className="studio-repeater">
                     {selectedAsset.metrics.map((metric, index) => (
@@ -641,6 +1117,10 @@ export function ContentStudio({
                     <button
                       type="button"
                       className="studio-add-button"
+                      disabled={
+                        selectedAsset.metrics.length >=
+                        CONTENT_LIMITS.asset.metrics
+                      }
                       onClick={() =>
                         updateAsset(selectedAsset.id, {
                           metrics: [
@@ -655,72 +1135,195 @@ export function ContentStudio({
                   </div>
                 </Section>
 
-                <Section title={text.entries}>
-                  <div className="studio-repeater">
-                    {selectedAsset.entries.map((entry, index) => (
-                      <div className="studio-repeater-item is-entry" key={`entry-${index}`}>
-                        <span className="studio-repeater-number">
-                          {String(index + 1).padStart(2, "0")}
-                        </span>
-                        <div className="studio-field-grid">
-                          {(
-                            ["eyebrow", "title", "body", "meta"] as const
-                          ).map((key) => (
-                            <Field
-                              key={key}
-                              label={text.fields[key]}
-                              value={entry[key]}
-                              multiline={key === "body"}
-                              wide={key === "body"}
-                              onChange={(value) => {
-                                const entries = selectedAsset.entries.map(
-                                  (item, itemIndex) =>
-                                    itemIndex === index
-                                      ? { ...item, [key]: value }
-                                      : item,
-                                );
-                                updateAsset(selectedAsset.id, { entries });
-                              }}
-                            />
-                          ))}
-                        </div>
-                        <button
-                          type="button"
-                          className="studio-remove-button"
-                          onClick={() =>
-                            updateAsset(selectedAsset.id, {
-                              entries: selectedAsset.entries.filter(
-                                (_, itemIndex) => itemIndex !== index,
-                              ),
-                            })
-                          }
+                {selectedAsset.id === "photography" ? (
+                  <Section
+                    title={text.photographyEntries}
+                    description={text.photographyHelp}
+                  >
+                    <div className="studio-repeater studio-photo-repeater">
+                      {stablePhotographyEntries.map((entry, index) => (
+                        <div
+                          className="studio-repeater-item is-photo"
+                          key={entry.id}
                         >
-                          {text.remove}
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="studio-add-button"
-                      onClick={() =>
-                        updateAsset(selectedAsset.id, {
-                          entries: [
-                            ...selectedAsset.entries,
-                            {
-                              eyebrow: "NEW",
-                              title:
-                                locale === "zh" ? "新的内容卡片" : "New card",
-                              body: "",
-                              meta: "",
-                            },
-                          ],
-                        })
-                      }
-                    >
-                      + {text.addEntry}
-                    </button>
-                  </div>
-                </Section>
+                          <span className="studio-repeater-number">
+                            {String(index + 1).padStart(2, "0")}
+                          </span>
+                          <div className="studio-photo-editor">
+                            <ImageUploadField
+                              locale={locale}
+                              kind="photography"
+                              label={`${text.photographyEntries} ${String(
+                                index + 1,
+                              ).padStart(2, "0")}`}
+                              description={text.portraitHelp}
+                              value={
+                                config.media?.photography?.sources?.[
+                                  entry.id
+                                ]
+                              }
+                              alt={entry.imageAlt ?? entry.title}
+                              fallback={String(index + 1).padStart(2, "0")}
+                              disabled={!projectWritable}
+                              onUploaded={(url) =>
+                                updatePhotoSource(entry.id, url)
+                              }
+                              onClear={() =>
+                                updatePhotoSource(entry.id, undefined)
+                              }
+                            />
+                            <label className="studio-spotlight-control">
+                              <input
+                                type="radio"
+                                name="photography-spotlight"
+                                checked={selectedSpotlightId === entry.id}
+                                onChange={() =>
+                                  updatePhotographyMedia({
+                                    spotlightId: entry.id,
+                                  })
+                                }
+                              />
+                              <span>
+                                <strong>{text.spotlight}</strong>
+                                <small>{text.spotlightHelp}</small>
+                              </span>
+                            </label>
+                            <div className="studio-field-grid">
+                              {(
+                                [
+                                  "imageAlt",
+                                  "eyebrow",
+                                  "title",
+                                  "body",
+                                  "meta",
+                                ] as const
+                              ).map((key) => (
+                                <Field
+                                  key={key}
+                                  label={
+                                    key === "imageAlt"
+                                      ? text.fields.photoAlt
+                                      : text.fields[key]
+                                  }
+                                  value={entry[key] ?? ""}
+                                  multiline={key === "body"}
+                                  wide={
+                                    key === "imageAlt" || key === "body"
+                                  }
+                                  onChange={(value) => {
+                                    const entries =
+                                      stablePhotographyEntries.map(
+                                        (item, itemIndex) =>
+                                          itemIndex === index
+                                            ? { ...item, [key]: value }
+                                            : item,
+                                      );
+                                    updateAsset(selectedAsset.id, {
+                                      entries,
+                                    });
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="studio-remove-button"
+                            onClick={() =>
+                              removePhotographyEntry(entry.id)
+                            }
+                          >
+                            {text.remove}
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="studio-add-button"
+                        disabled={photographyEntryLimitReached}
+                        onClick={addPhotographyEntry}
+                      >
+                        + {text.addEntry}
+                      </button>
+                    </div>
+                  </Section>
+                ) : (
+                  <Section title={text.entries}>
+                    <div className="studio-repeater">
+                      {selectedAsset.entries.map((entry, index) => (
+                        <div
+                          className="studio-repeater-item is-entry"
+                          key={entry.id ?? `entry-${index}`}
+                        >
+                          <span className="studio-repeater-number">
+                            {String(index + 1).padStart(2, "0")}
+                          </span>
+                          <div className="studio-field-grid">
+                            {(
+                              ["eyebrow", "title", "body", "meta"] as const
+                            ).map((key) => (
+                              <Field
+                                key={key}
+                                label={text.fields[key]}
+                                value={entry[key]}
+                                multiline={key === "body"}
+                                wide={key === "body"}
+                                onChange={(value) => {
+                                  const entries = selectedAsset.entries.map(
+                                    (item, itemIndex) =>
+                                      itemIndex === index
+                                        ? { ...item, [key]: value }
+                                        : item,
+                                  );
+                                  updateAsset(selectedAsset.id, { entries });
+                                }}
+                              />
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            className="studio-remove-button"
+                            onClick={() =>
+                              updateAsset(selectedAsset.id, {
+                                entries: selectedAsset.entries.filter(
+                                  (_, itemIndex) => itemIndex !== index,
+                                ),
+                              })
+                            }
+                          >
+                            {text.remove}
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="studio-add-button"
+                        disabled={
+                          selectedAsset.entries.length >=
+                          CONTENT_LIMITS.asset.entries
+                        }
+                        onClick={() =>
+                          updateAsset(selectedAsset.id, {
+                            entries: [
+                              ...selectedAsset.entries,
+                              {
+                                eyebrow: "NEW",
+                                title:
+                                  locale === "zh"
+                                    ? "新的内容卡片"
+                                    : "New card",
+                                body: "",
+                                meta: "",
+                              },
+                            ],
+                          })
+                        }
+                      >
+                        + {text.addEntry}
+                      </button>
+                    </div>
+                  </Section>
+                )}
               </div>
             )}
           </div>
