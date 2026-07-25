@@ -85,6 +85,7 @@ test("keeps bilingual content, 3D interaction, and fallback navigation in the pr
   assert.match(studio, /site-content\.json/);
   assert.match(contentConfig, /normalizeSiteContent/);
   assert.match(contentConfig, /mergeAssets/);
+  assert.match(contentConfig, /timezone: "GMT\+8"/);
   assert.match(packageJson, /"three":/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 

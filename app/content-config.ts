@@ -58,7 +58,7 @@ export const DEFAULT_PROFILE: Readonly<
       "我把生活、好奇与正在发生的作品，放进了这间房。每件物品，都是认识我的一种方式。",
     quote: "“物品不是分类图标，而是生活方式的证据。”",
     city: "上海",
-    timezone: "Asia/Shanghai",
+    timezone: "GMT+8",
   },
   en: {
     displayName: "Your Name",
@@ -72,7 +72,7 @@ export const DEFAULT_PROFILE: Readonly<
     quote:
       "“Objects are not category icons. They are evidence of a life.”",
     city: "Shanghai",
-    timezone: "Asia/Shanghai",
+    timezone: "GMT+8",
   },
 };
 

@@ -35,6 +35,11 @@ const DEFAULT_DAY_OF_YEAR = 80;
 
 const clockFormatters = new Map<string, Intl.DateTimeFormat>();
 
+interface ResolvedTimeZone {
+  timeZone: string;
+  offsetMinutes: number | null;
+}
+
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
@@ -78,6 +83,74 @@ function calculateDayOfYear(year: number, month: number, day: number): number {
   return monthOffsets[month - 1] + day;
 }
 
+function formatOffsetTimeZone(offsetMinutes: number): string {
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  const absoluteMinutes = Math.abs(offsetMinutes);
+  const hours = Math.floor(absoluteMinutes / 60);
+  const minutes = absoluteMinutes % 60;
+
+  return `GMT${sign}${hours}${minutes === 0 ? "" : `:${String(minutes).padStart(2, "0")}`}`;
+}
+
+function parseFixedOffsetTimeZone(
+  timeZone: string,
+): ResolvedTimeZone | null {
+  const match = /^(?:GMT|UTC)\s*([+-])\s*(\d{1,2})(?:\s*:\s*(\d{2}))?$/i.exec(
+    timeZone.trim(),
+  );
+  if (!match) {
+    return null;
+  }
+
+  const hours = Number(match[2]);
+  const minutes = match[3] === undefined ? 0 : Number(match[3]);
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    minutes >= 60 ||
+    hours > 14 ||
+    (hours === 14 && minutes !== 0)
+  ) {
+    return null;
+  }
+
+  const direction = match[1] === "-" ? -1 : 1;
+  const offsetMinutes = direction * (hours * 60 + minutes);
+
+  return {
+    timeZone: formatOffsetTimeZone(offsetMinutes),
+    offsetMinutes,
+  };
+}
+
+function resolveTimeZoneDetails(timeZone: string): ResolvedTimeZone {
+  if (typeof timeZone !== "string" || timeZone.trim() === "") {
+    return {
+      timeZone: FALLBACK_TIME_ZONE,
+      offsetMinutes: null,
+    };
+  }
+
+  const fixedOffset = parseFixedOffsetTimeZone(timeZone);
+  if (fixedOffset) {
+    return fixedOffset;
+  }
+
+  try {
+    return {
+      timeZone: new Intl.DateTimeFormat("en-US", {
+        timeZone: timeZone.trim(),
+      }).resolvedOptions().timeZone,
+      offsetMinutes: null,
+    };
+  } catch {
+    return {
+      timeZone: FALLBACK_TIME_ZONE,
+      offsetMinutes: null,
+    };
+  }
+}
+
 function getClockFormatter(timeZone: string): Intl.DateTimeFormat {
   const existing = clockFormatters.get(timeZone);
   if (existing) {
@@ -118,33 +191,42 @@ function partNumber(
 }
 
 export function resolveTimeZone(timeZone: string): string {
-  if (typeof timeZone !== "string" || timeZone.trim() === "") {
-    return FALLBACK_TIME_ZONE;
-  }
-
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone: timeZone.trim(),
-    }).resolvedOptions().timeZone;
-  } catch {
-    return FALLBACK_TIME_ZONE;
-  }
+  return resolveTimeZoneDetails(timeZone).timeZone;
 }
 
 export function getZonedClock(date: Date, timeZone: string): ZonedClock {
   assertValidDate(date);
 
-  const resolvedTimeZone = resolveTimeZone(timeZone);
-  const parts = getClockFormatter(resolvedTimeZone).formatToParts(date);
-  const year = partNumber(parts, "year");
-  const month = partNumber(parts, "month");
-  const day = partNumber(parts, "day");
-  const hour = partNumber(parts, "hour");
-  const minute = partNumber(parts, "minute");
-  const second = partNumber(parts, "second");
+  const resolved = resolveTimeZoneDetails(timeZone);
+  let year: number;
+  let month: number;
+  let day: number;
+  let hour: number;
+  let minute: number;
+  let second: number;
+
+  if (resolved.offsetMinutes !== null) {
+    const shiftedDate = new Date(
+      date.getTime() + resolved.offsetMinutes * 60_000,
+    );
+    year = shiftedDate.getUTCFullYear();
+    month = shiftedDate.getUTCMonth() + 1;
+    day = shiftedDate.getUTCDate();
+    hour = shiftedDate.getUTCHours();
+    minute = shiftedDate.getUTCMinutes();
+    second = shiftedDate.getUTCSeconds();
+  } else {
+    const parts = getClockFormatter(resolved.timeZone).formatToParts(date);
+    year = partNumber(parts, "year");
+    month = partNumber(parts, "month");
+    day = partNumber(parts, "day");
+    hour = partNumber(parts, "hour");
+    minute = partNumber(parts, "minute");
+    second = partNumber(parts, "second");
+  }
 
   return {
-    timeZone: resolvedTimeZone,
+    timeZone: resolved.timeZone,
     year,
     month,
     day,
@@ -249,20 +331,29 @@ export function formatZonedTime(
 ): string {
   assertValidDate(date);
 
-  const resolvedTimeZone = resolveTimeZone(timeZone);
+  const resolved = resolveTimeZoneDetails(timeZone);
+  const dateToFormat =
+    resolved.offsetMinutes === null
+      ? date
+      : new Date(date.getTime() + resolved.offsetMinutes * 60_000);
+  const timeZoneToFormat =
+    resolved.offsetMinutes === null
+      ? resolved.timeZone
+      : FALLBACK_TIME_ZONE;
+
   try {
     return new Intl.DateTimeFormat(locale, {
-      timeZone: resolvedTimeZone,
+      timeZone: timeZoneToFormat,
       hour: "2-digit",
       minute: "2-digit",
       hourCycle: "h23",
-    }).format(date);
+    }).format(dateToFormat);
   } catch {
     return new Intl.DateTimeFormat("en-GB", {
-      timeZone: resolvedTimeZone,
+      timeZone: timeZoneToFormat,
       hour: "2-digit",
       minute: "2-digit",
       hourCycle: "h23",
-    }).format(date);
+    }).format(dateToFormat);
   }
 }

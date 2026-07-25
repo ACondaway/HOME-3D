@@ -71,6 +71,91 @@ test("falls back to UTC for an empty or invalid IANA time zone", () => {
   assert.equal(formatZonedTime(date, "Mars/Olympus_Mons"), "04:05");
 });
 
+test("normalizes supported GMT and UTC fixed-offset labels", () => {
+  assert.equal(resolveTimeZone("GMT+8"), "GMT+8");
+  assert.equal(resolveTimeZone("GMT+08:00"), "GMT+8");
+  assert.equal(resolveTimeZone("UTC-5"), "GMT-5");
+  assert.equal(resolveTimeZone(" UTC + 5 : 30 "), "GMT+5:30");
+  assert.equal(resolveTimeZone("gmt - 03 : 30"), "GMT-3:30");
+});
+
+test("applies positive, negative, and half-hour offsets across dates", () => {
+  const positive = getZonedClock(
+    new Date("2026-12-31T18:15:30.000Z"),
+    "GMT+08:00",
+  );
+  const negative = getZonedClock(
+    new Date("2026-01-01T03:15:00.000Z"),
+    "UTC-5",
+  );
+  const halfHour = getZonedClock(
+    new Date("2026-01-01T06:45:00.000Z"),
+    "UTC+5:30",
+  );
+
+  assert.deepEqual(
+    [
+      positive.timeZone,
+      positive.year,
+      positive.month,
+      positive.day,
+      positive.hour,
+      positive.minute,
+      positive.second,
+      positive.dayOfYear,
+    ],
+    ["GMT+8", 2027, 1, 1, 2, 15, 30, 1],
+  );
+  assert.deepEqual(
+    [
+      negative.timeZone,
+      negative.year,
+      negative.month,
+      negative.day,
+      negative.hour,
+      negative.minute,
+      negative.dayOfYear,
+    ],
+    ["GMT-5", 2025, 12, 31, 22, 15, 365],
+  );
+  assert.deepEqual(
+    [halfHour.timeZone, halfHour.hour, halfHour.minute, halfHour.localMinutes],
+    ["GMT+5:30", 12, 15, 735],
+  );
+});
+
+test("formats and lights fixed-offset clocks from the same local time", () => {
+  const instant = new Date("2026-06-21T04:00:00.000Z");
+  const shanghaiLike = getSolarLightingState(instant, "GMT+8");
+  const western = getSolarLightingState(instant, "UTC-5");
+
+  assert.equal(formatZonedTime(instant, "GMT+08:00"), "12:00");
+  assert.equal(formatZonedTime(instant, "UTC-5"), "23:00");
+  assert.equal(shanghaiLike.resolvedTimeZone, "GMT+8");
+  assert.equal(shanghaiLike.localMinutes, 12 * 60);
+  assert.equal(shanghaiLike.phase, "day");
+  assert.equal(western.resolvedTimeZone, "GMT-5");
+  assert.equal(western.localMinutes, 23 * 60);
+  assert.equal(western.phase, "night");
+  assert.ok(shanghaiLike.daylight > western.daylight);
+  assert.ok(western.artificialLight > shanghaiLike.artificialLight);
+});
+
+test("rejects out-of-range or malformed fixed offsets", () => {
+  const date = new Date("2026-02-03T04:05:06.000Z");
+
+  for (const invalid of [
+    "GMT+14:01",
+    "UTC-14:30",
+    "GMT+15",
+    "GMT+5:60",
+    "UTC--5",
+  ]) {
+    assert.equal(resolveTimeZone(invalid), "UTC");
+    assert.deepEqual(getZonedClock(date, invalid), getZonedClock(date, "UTC"));
+  }
+});
+
 test("keeps all scene-driving light values normalized", () => {
   const phases = new Set(["night", "dawn", "day", "dusk"]);
 
